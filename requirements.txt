@@ -1,0 +1,6 @@
+pyspark
+delta-spark
+apache-airflow
+boto3
+pandas
+python-dotenv
