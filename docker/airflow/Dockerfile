@@ -1,7 +1,10 @@
-FROM apache/airflow:2.5.1-python3.9
+FROM apache/airflow:2.9.0-python3.11
 
 USER root
-RUN apt-get update && apt-get install -y default-jdk
+RUN apt-get update && \
+    apt-get install -y gcc python3-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 USER airflow
-RUN pip install pyspark delta-spark boto3 python-dotenv
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
