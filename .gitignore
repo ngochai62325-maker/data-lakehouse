@@ -6,3 +6,5 @@ dataset/*.csv
 logs/
 plugins/
 !dataset/.gitkeep
+.Trash-0/
+**/.Trash-0/
