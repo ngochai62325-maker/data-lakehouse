@@ -1,4 +1,4 @@
-from src.config.settings import BRONZE_PATH, SILVER_PATH
+from etl_pipeline.config.settings import BRONZE_PATH, SILVER_PATH
 
 
 def read_delta_table(spark, layer, table_name):

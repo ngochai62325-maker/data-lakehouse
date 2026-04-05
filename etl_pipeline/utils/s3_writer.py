@@ -1,4 +1,4 @@
-from src.config.settings import SILVER_PATH, GOLD_PATH
+from etl_pipeline.config.settings import SILVER_PATH, GOLD_PATH
 
 
 def write_delta_table(df, layer, table_name, mode="overwrite"):

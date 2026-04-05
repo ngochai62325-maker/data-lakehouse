@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession
 from delta import configure_spark_with_delta_pip
-from src.config.settings import AWS_ACCESS_KEY, AWS_SECRET_KEY
+from etl_pipeline.config.settings import AWS_ACCESS_KEY, AWS_SECRET_KEY
 
 
 def get_spark_session(app_name="LakehouseApp"):
