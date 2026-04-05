@@ -117,6 +117,7 @@ services:
       - ./dataset:/opt/spark/dataset
       - ./config:/opt/spark/config
       - ./etl_pipeline:/opt/spark/etl_pipeline
+      - ./src:/opt/spark/src
     ports:
       - "8888:8888"
 
