@@ -1,28 +1,14 @@
-import os
 import sys
 
-# Thêm path để import utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, "/opt/spark/etl_pipeline")
+sys.path.insert(0, "/opt/spark")
 
-from utils.spark_session import get_spark_session
+from config.settings import S3_BRONZE, OLIST_TABLES
+from etl_pipeline.utils.spark_session import get_spark_session
 
 
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "olist-lakehouse-2026")
-S3_BRONZE_PATH = f"s3a://{S3_BUCKET_NAME}/bronze/"
-
-# Danh sách tất cả các bảng cần kiểm tra
-ALL_TABLES = [
-    "olist_customers_dataset",
-    "olist_geolocation_dataset",
-    "olist_orders_dataset",
-    "olist_order_items_dataset",
-    "olist_order_payments_dataset",
-    "olist_order_reviews_dataset",
-    "olist_products_dataset",
-    "olist_sellers_dataset",
-    "product_category_name_translation",
-    "holidays_dataset"
-]
+# Danh sách tất cả các bảng cần kiểm tra (bao gồm holidays)
+ALL_TABLES = OLIST_TABLES + ["holidays_dataset"]
 
 
 def validate_bronze(spark, expected_counts=None):
@@ -44,7 +30,7 @@ def validate_bronze(spark, expected_counts=None):
     results = []
     
     for table_name in ALL_TABLES:
-        s3_path = f"{S3_BRONZE_PATH}{table_name}"
+        s3_path = f"{S3_BRONZE}/{table_name}"
         
         try:
             df = spark.read.format("delta").load(s3_path)
@@ -99,7 +85,7 @@ def main():
     
     print("=" * 60)
     print("SPARK SESSION INITIALIZED")
-    print(f"S3 Bronze Path: {S3_BRONZE_PATH}")
+    print(f"S3 Bronze Path: {S3_BRONZE}")
     print("=" * 60)
     
     try:
