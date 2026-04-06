@@ -1,18 +1,15 @@
-import os
 import sys
 import requests
 import pandas as pd
 
-# Thêm path để import utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, "/opt/spark/etl_pipeline")
+sys.path.insert(0, "/opt/spark")
 
-from utils.spark_session import get_spark_session
+from config.settings import S3_BRONZE
+from etl_pipeline.utils.spark_session import get_spark_session
 
 
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "olist-lakehouse-2026")
-S3_BRONZE_PATH = f"s3a://{S3_BUCKET_NAME}/bronze/"
-
-# API Config
+# CẤU HÌNH API
 API_BASE_URL = "https://date.nager.at/api/v3/PublicHolidays"
 COUNTRY_CODE = "BR"  # Brazil
 YEARS_TO_FETCH = [2016, 2017, 2018]
@@ -51,7 +48,7 @@ def load_api_holidays(spark):
     df_holidays = spark.createDataFrame(pdf)
     
     # Ghi lên S3
-    s3_path = f"{S3_BRONZE_PATH}holidays_dataset"
+    s3_path = f"{S3_BRONZE}/holidays_dataset"
     df_holidays.write \
         .format("delta") \
         .mode("overwrite") \
@@ -69,7 +66,7 @@ def main():
     
     print("=" * 60)
     print("SPARK SESSION INITIALIZED")
-    print(f"S3 Bronze Path: {S3_BRONZE_PATH}")
+    print(f"S3 Bronze Path: {S3_BRONZE}")
     print("=" * 60)
     
     try:

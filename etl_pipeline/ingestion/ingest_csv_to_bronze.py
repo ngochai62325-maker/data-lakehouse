@@ -1,31 +1,16 @@
 import argparse
-import os
 import sys
 
-# Thêm path để import utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, "/opt/spark/etl_pipeline")
+sys.path.insert(0, "/opt/spark")
 
-from utils.spark_session import get_spark_session
+from config.settings import S3_BRONZE, OLIST_TABLES
+from etl_pipeline.utils.spark_session import get_spark_session
 from delta.tables import DeltaTable
 
 
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "olist-lakehouse-2026")
-S3_BRONZE_PATH = f"s3a://{S3_BUCKET_NAME}/bronze/"
 LOCAL_DATA_DIR = "/opt/spark/dataset/"
 INCREMENTAL_DATA_DIR = "/opt/spark/dataset/incremental/"
-
-# Danh sách các bảng Olist
-OLIST_TABLES = [
-    "olist_customers_dataset",
-    "olist_geolocation_dataset",
-    "olist_orders_dataset",
-    "olist_order_items_dataset",
-    "olist_order_payments_dataset",
-    "olist_order_reviews_dataset",
-    "olist_products_dataset",
-    "olist_sellers_dataset",
-    "product_category_name_translation"
-]
 
 # Khóa chính cho mỗi bảng (dùng cho incremental load)
 TABLE_KEYS = {
@@ -57,7 +42,7 @@ def full_load(spark):
     
     for table_name in OLIST_TABLES:
         csv_path = f"{LOCAL_DATA_DIR}{table_name}.csv"
-        s3_path = f"{S3_BRONZE_PATH}{table_name}"
+        s3_path = f"{S3_BRONZE}/{table_name}"
         
         try:
             print(f"\n[{table_name}]")
@@ -99,7 +84,7 @@ def incremental_load(spark):
     
     for table_name, merge_key in TABLE_KEYS.items():
         new_data_file = f"{INCREMENTAL_DATA_DIR}{table_name}_new.csv"
-        bronze_path = f"{S3_BRONZE_PATH}{table_name}"
+        bronze_path = f"{S3_BRONZE}/{table_name}"
         
         try:
             print(f"\n[{table_name}]")
@@ -153,7 +138,7 @@ def incremental_load(spark):
     print("=" * 60)
     if results:
         for table, new_cnt, total in results:
-            print(f"{table}: +{new_cnt:,} → Tổng: {total:,}")
+            print(f"   {table}: +{new_cnt:,} → Tổng: {total:,}")
     else:
         print("Không có dữ liệu mới để nạp")
     
@@ -177,7 +162,7 @@ def main():
     
     print("=" * 60)
     print("SPARK SESSION INITIALIZED")
-    print(f"S3 Bronze Path: {S3_BRONZE_PATH}")
+    print(f"S3 Bronze Path: {S3_BRONZE}")
     print("=" * 60)
     
     try:
