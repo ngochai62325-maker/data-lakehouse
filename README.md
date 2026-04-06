@@ -5,7 +5,6 @@
 **Mô tả tổng quan:** Ứng dụng kiến trúc Medallion (Bronze - Silver - Gold) kết hợp với các công cụ như Apache Spark, Apache Airflow, Amazon S3, Delta Lake, AWS Athena và Power BI để xây dựng luồng xử lý dữ liệu (ETL Pipeline) tự động quy mô lớn.
 
 ## Cấu trúc thư mục
-## Cấu trúc thư mục
 - `etl_pipeline/`: Chứa các Spark jobs xử lý dữ liệu theo tầng Medallion (bronze, silver, gold).
 - `dags/`: Chứa các Airflow DAGs để lập lịch và điều phối luồng dữ liệu (ETL pipeline).
 - `docker/`: Chứa Dockerfile và cấu hình cho các dịch vụ (Spark, Airflow).
