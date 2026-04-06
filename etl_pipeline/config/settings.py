@@ -1,9 +1,0 @@
-import os
-
-AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-
-BRONZE_PATH = f"s3a://{S3_BUCKET_NAME}/bronze"
-SILVER_PATH = f"s3a://{S3_BUCKET_NAME}/silver"
-GOLD_PATH = f"s3a://{S3_BUCKET_NAME}/gold"

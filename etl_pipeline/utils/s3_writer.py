@@ -1,12 +1,14 @@
-from etl_pipeline.config.settings import SILVER_PATH, GOLD_PATH
+from config.settings import S3_BRONZE, S3_SILVER, S3_GOLD
 
 def write_delta_table(df, layer, table_name, mode="overwrite"):
-    if layer == "silver":
-        path = f"{SILVER_PATH}/{table_name}"
+    if layer == "bronze":
+        path = f"{S3_BRONZE}/{table_name}"
+    elif layer == "silver":
+        path = f"{S3_SILVER}/{table_name}"
     elif layer == "gold":
-        path = f"{GOLD_PATH}/{table_name}"
+        path = f"{S3_GOLD}/{table_name}"
     else:
-        raise ValueError("Layer must be 'silver' or 'gold'")
+        raise ValueError("Layer must be 'bronze', 'silver', or 'gold'")
 
     # Initialize the writer
     writer = df.write.format("delta").mode(mode)
