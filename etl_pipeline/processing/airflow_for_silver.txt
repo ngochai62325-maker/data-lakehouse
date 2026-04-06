@@ -1,0 +1,8 @@
+How to use this with Airflow
+Because of the argparse setup at the bottom, when you eventually build your Airflow DAGs, you won't need to write 9 different Python scripts. You can use the exact same file and just change the argument in your SparkSubmitOperator.
+
+For example, your Airflow task for products would look something like this under the hood:
+spark-submit /opt/airflow/etl_pipeline/silver_transformations.py --table products
+
+And your task for orders would simply be:
+spark-submit /opt/airflow/etl_pipeline/silver_transformations.py --table orders
