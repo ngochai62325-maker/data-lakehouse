@@ -1,4 +1,4 @@
-from config.settings import S3_BRONZE, S3_SILVER, S3_GOLD
+from config.settings import S3_BRONZE, S3_SILVER, S3_GOLD, S3_PLATINUM
 
 def read_delta_table(spark, layer, table_name):
     if layer == "bronze":
@@ -7,7 +7,9 @@ def read_delta_table(spark, layer, table_name):
         path = f"{S3_SILVER}/{table_name}"
     elif layer == "gold":
         path = f"{S3_GOLD}/{table_name}"
+    elif layer == "platinum":
+        path = f"{S3_PLATINUM}/{table_name}"
     else:
-        raise ValueError("Layer must be 'bronze', 'silver', or 'gold'")
+        raise ValueError("Layer must be 'bronze', 'silver', 'gold', or 'platinum'")
 
     return spark.read.format("delta").load(path)

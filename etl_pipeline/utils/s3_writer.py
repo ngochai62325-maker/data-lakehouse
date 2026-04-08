@@ -1,4 +1,4 @@
-from config.settings import S3_BRONZE, S3_SILVER, S3_GOLD
+from config.settings import S3_BRONZE, S3_SILVER, S3_GOLD, S3_PLATINUM
 
 def write_delta_table(df, layer, table_name, mode="overwrite"):
     if layer == "bronze":
@@ -7,8 +7,10 @@ def write_delta_table(df, layer, table_name, mode="overwrite"):
         path = f"{S3_SILVER}/{table_name}"
     elif layer == "gold":
         path = f"{S3_GOLD}/{table_name}"
+    elif layer == "platinum":
+        path = f"{S3_PLATINUM}/{table_name}"
     else:
-        raise ValueError("Layer must be 'bronze', 'silver', or 'gold'")
+        raise ValueError("Layer must be 'bronze', 'silver', 'gold', or 'platinum'")
 
     # Initialize the writer
     writer = df.write.format("delta").mode(mode)
