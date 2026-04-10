@@ -1,541 +1,190 @@
 import sys
 import os
 import argparse
-from functools import wraps
-from typing import Dict, Any, Callable
+from pyspark.sql import functions as F
 
-# --- PATH FIX ---
+# Fix the path so Python can find your custom modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
-# ----------------
-
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import (
-    col, to_date, date_format, year, month, quarter, dayofmonth,
-    concat_ws, lit, row_number, first, sum as spark_sum, sequence,
-    explode, min as spark_min, max as spark_max
-)
-from pyspark.sql.window import Window
-from pyspark.sql.types import IntegerType
 
 from etl_pipeline.utils.spark_session import get_spark_session
 from etl_pipeline.utils.s3_reader import read_delta_table
 from etl_pipeline.utils.s3_writer import write_delta_table
 
-
-# =============================================================================
-# ASSET DECORATOR
-# =============================================================================
-
-def asset(table_name: str):
-    """
-    Decorator to register a function as a Gold layer asset.
-    Provides metadata logging: table_name, row_count, column_count, columns.
-    """
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(spark: SparkSession, *args, **kwargs) -> DataFrame:
-            print(f"\n{'='*60}")
-            print(f"Processing Asset: {table_name}")
-            print(f"{'='*60}")
-            
-            # Execute transformation
-            df = func(spark, *args, **kwargs)
-            
-            # Write to Gold layer
-            write_delta_table(df, "gold", table_name, mode="overwrite")
-            
-            # Log metadata
-            metadata = get_metadata(df, table_name)
-            log_metadata(metadata)
-            
-            return df
-        
-        wrapper.table_name = table_name
-        wrapper.is_asset = True
-        return wrapper
-    return decorator
-
-
-def get_metadata(df: DataFrame, table_name: str) -> Dict[str, Any]:
-    """Extract metadata from DataFrame."""
-    return {
-        "table_name": table_name,
-        "row_count": df.count(),
-        "column_count": len(df.columns),
-        "columns": df.columns
-    }
-
-
-def log_metadata(metadata: Dict[str, Any]) -> None:
-    """Log metadata to console."""
-    print(f"\n--- Metadata for {metadata['table_name']} ---")
-    print(f"  Table Name   : {metadata['table_name']}")
-    print(f"  Row Count    : {metadata['row_count']:,}")
-    print(f"  Column Count : {metadata['column_count']}")
-    print(f"  Columns      : {', '.join(metadata['columns'])}")
-    print("-" * 40)
-
-
-# =============================================================================
+# ==========================================
 # DIMENSION TABLES
-# =============================================================================
+# ==========================================
 
-@asset("dim_customer")
-def create_dim_customer(spark: SparkSession) -> DataFrame:
-    """
-    Create dim_customer dimension table.
-    Source: customer + geolocation (joined by zip_code_prefix)
-    PK: customer_id
-    """
-    # Read Silver tables
-    customer_df = read_delta_table(spark, "silver", "silver_olist_customers_dataset")
-    geolocation_df = read_delta_table(spark, "silver", "silver_olist_geolocation_dataset")
+def transform_dim_products(spark):
+    print("Transforming dim_products...")
+    df_silver_products = read_delta_table(spark, "silver", "silver_olist_products_dataset")
+    df_silver_translation = read_delta_table(spark, "silver", "silver_product_category_name_translation")
     
-    # Deduplicate geolocation by zip_code_prefix (take first occurrence)
-    geo_window = Window.partitionBy("geolocation_zip_code_prefix").orderBy("geolocation_lat")
-    geo_dedup = (
-        geolocation_df
-        .withColumn("rn", row_number().over(geo_window))
-        .filter(col("rn") == 1)
-        .drop("rn")
-        .select(
-            col("geolocation_zip_code_prefix").alias("zip_code_prefix"),
-            col("geolocation_lat").alias("customer_lat"),
-            col("geolocation_lng").alias("customer_lng")
-        )
+    df_dim_products = df_silver_products.join(df_silver_translation, on="product_category_name", how="left")
+    df_final = df_dim_products.select(
+        F.col("product_id"),
+        F.col("product_category_name").alias("product_category_pt"),
+        F.col("product_category_name_english").alias("product_category_en"),
+        F.col("product_weight_g"),
+        F.col("product_length_cm"),
+        F.col("product_height_cm"),
+        F.col("product_width_cm")
+    )
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_products", mode="overwrite")
+
+def transform_dim_sellers(spark):
+    print("Transforming dim_sellers...")
+    df_silver_sellers = read_delta_table(spark, "silver", "silver_olist_sellers_dataset")
+    df_silver_geo = read_delta_table(spark, "silver", "silver_olist_geolocation_dataset")
+    
+    df_geo_centroid = df_silver_geo.groupBy("geolocation_zip_code_prefix").agg(
+        F.avg("geolocation_lat").alias("geolocation_lat"),
+        F.avg("geolocation_lng").alias("geolocation_lng")
     )
     
-    # Join customer with geolocation
-    dim_customer = (
-        customer_df
-        .join(
-            geo_dedup,
-            customer_df["customer_zip_code_prefix"] == geo_dedup["zip_code_prefix"],
-            "left"
-        )
-        .select(
-            col("customer_id"),
-            col("customer_unique_id"),
-            col("customer_city"),
-            col("customer_state"),
-            col("customer_lat"),
-            col("customer_lng")
-        )
-        .dropDuplicates(["customer_id"])
+    df_dim_sellers = df_silver_sellers.join(
+        df_geo_centroid,
+        df_silver_sellers["seller_zip_code_prefix"] == df_geo_centroid["geolocation_zip_code_prefix"],
+        how="left"
+    )
+    df_final = df_dim_sellers.select(
+        F.col("seller_id"), F.col("seller_city"), F.col("seller_state"), 
+        F.col("seller_zip_code_prefix"), F.col("geolocation_lat").alias("seller_lat"), 
+        F.col("geolocation_lng").alias("seller_lng")
+    )
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_sellers", mode="overwrite")
+
+def transform_dim_customers(spark):
+    print("Transforming dim_customers...")
+    df_silver_customers = read_delta_table(spark, "silver", "silver_olist_customers_dataset")
+    df_silver_geo = read_delta_table(spark, "silver", "silver_olist_geolocation_dataset")
+    
+    df_geo_centroid = df_silver_geo.groupBy("geolocation_zip_code_prefix").agg(
+        F.avg("geolocation_lat").alias("geolocation_lat"),
+        F.avg("geolocation_lng").alias("geolocation_lng")
     )
     
-    return dim_customer
-
-
-@asset("dim_product")
-def create_dim_product(spark: SparkSession) -> DataFrame:
-    """
-    Create dim_product dimension table.
-    Source: product + product_category_translation (joined by product_category_name)
-    PK: product_id
-    """
-    # Read Silver tables
-    product_df = read_delta_table(spark, "silver", "silver_olist_products_dataset")
-    category_df = read_delta_table(spark, "silver", "silver_product_category_name_translation")
-    
-    # Join product with category translation
-    dim_product = (
-        product_df
-        .join(
-            category_df,
-            product_df["product_category_name"] == category_df["product_category_name"],
-            "left"
-        )
-        .select(
-            col("product_id"),
-            product_df["product_category_name"],
-            col("product_category_name_english"),
-            col("product_weight_g"),
-            col("product_length_cm"),
-            col("product_height_cm"),
-            col("product_width_cm")
-        )
-        .dropDuplicates(["product_id"])
+    df_dim_customers = df_silver_customers.join(
+        df_geo_centroid,
+        df_silver_customers["customer_zip_code_prefix"] == df_geo_centroid["geolocation_zip_code_prefix"],
+        how="left"
     )
-    
-    return dim_product
-
-
-@asset("dim_seller")
-def create_dim_seller(spark: SparkSession) -> DataFrame:
-    """
-    Create dim_seller dimension table.
-    Source: seller + geolocation (joined by zip_code_prefix)
-    PK: seller_id
-    """
-    # Read Silver tables
-    seller_df = read_delta_table(spark, "silver", "silver_olist_sellers_dataset")
-    geolocation_df = read_delta_table(spark, "silver", "silver_olist_geolocation_dataset")
-    
-    # Deduplicate geolocation by zip_code_prefix
-    geo_window = Window.partitionBy("geolocation_zip_code_prefix").orderBy("geolocation_lat")
-    geo_dedup = (
-        geolocation_df
-        .withColumn("rn", row_number().over(geo_window))
-        .filter(col("rn") == 1)
-        .drop("rn")
-        .select(
-            col("geolocation_zip_code_prefix").alias("zip_code_prefix"),
-            col("geolocation_city").alias("seller_city"),
-            col("geolocation_state").alias("seller_state")
-        )
+    df_final = df_dim_customers.select(
+        F.col("customer_id"), F.col("customer_unique_id"), F.col("customer_city"), 
+        F.col("customer_state"), F.col("customer_zip_code_prefix"), 
+        F.col("geolocation_lat").alias("customer_lat"), F.col("geolocation_lng").alias("customer_lng")
     )
-    
-    # Join seller with geolocation
-    dim_seller = (
-        seller_df
-        .join(
-            geo_dedup,
-            seller_df["seller_zip_code_prefix"] == geo_dedup["zip_code_prefix"],
-            "left"
-        )
-        .select(
-            seller_df["seller_id"],
-            geo_dedup["seller_city"],
-            geo_dedup["seller_state"]
-        )
-        .dropDuplicates(["seller_id"])
-    )
-    
-    return dim_seller
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_customers", mode="overwrite")
 
+def transform_dim_date(spark):
+    print("Generating dim_date...")
+    start_date = "2016-01-01"
+    end_date = "2018-12-31"
+    
+    df_dim_date = spark.sql(f"""
+        SELECT sequence(to_date('{start_date}'), to_date('{end_date}'), interval 1 day) as date_array
+    """).withColumn("full_date", F.explode("date_array")).drop("date_array")
+    
+    df_final = df_dim_date.select(
+        F.date_format(F.col("full_date"), "yyyyMMdd").cast("int").alias("date_key"),
+        F.col("full_date"),
+        F.dayofmonth(F.col("full_date")).alias("day_of_month"),
+        F.dayofweek(F.col("full_date")).alias("day_of_week"),
+        F.date_format(F.col("full_date"), "EEEE").alias("day_name"),
+        F.month(F.col("full_date")).alias("month"),
+        F.quarter(F.col("full_date")).alias("quarter"),
+        F.year(F.col("full_date")).alias("year")
+    ).withColumn("is_weekend", F.when(F.col("day_of_week").isin([1, 7]), True).otherwise(False))
+    
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_date", mode="overwrite")
 
-@asset("dim_order")
-def create_dim_order(spark: SparkSession) -> DataFrame:
-    """
-    Create dim_order dimension table.
-    Source: order + payment (joined by order_id)
-    PK: order_id
-    """
-    # Read Silver tables
-    order_df = read_delta_table(spark, "silver", "silver_olist_orders_dataset")
-    payment_df = read_delta_table(spark, "silver", "silver_olist_order_payments_dataset")
-    
-    # Aggregate payment_type per order (take most common or first)
-    payment_agg = (
-        payment_df
-        .groupBy("order_id")
-        .agg(first("payment_type").alias("payment_type"))
-    )
-    
-    # Join order with payment
-    dim_order = (
-        order_df
-        .join(payment_agg, "order_id", "left")
-        .select(
-            col("order_id"),
-            col("order_status"),
-            col("payment_type"),
-            col("order_purchase_timestamp"),
-            col("order_delivered_customer_date"),
-            col("order_estimated_delivery_date")
-        )
-        .dropDuplicates(["order_id"])
-    )
-    
-    return dim_order
-
-
-@asset("dim_date")
-def create_dim_date(spark: SparkSession) -> DataFrame:
-    """
-    Create dim_date dimension table.
-    Source: order_purchase_timestamp from orders
-    Generates date range from min to max purchase date.
-    PK: date_key (YYYYMMDD format)
-    """
-    # Read Silver orders to get date range
-    order_df = read_delta_table(spark, "silver", "silver_olist_orders_dataset")
-    
-    # Get min and max dates
-    date_range = (
-        order_df
-        .select(
-            spark_min(to_date(col("order_purchase_timestamp"))).alias("min_date"),
-            spark_max(to_date(col("order_purchase_timestamp"))).alias("max_date")
-        )
-        .collect()[0]
-    )
-    
-    min_date = date_range["min_date"]
-    max_date = date_range["max_date"]
-    
-    # Generate date sequence
-    date_seq_df = spark.sql(f"""
-        SELECT explode(sequence(
-            to_date('{min_date}'), 
-            to_date('{max_date}'), 
-            interval 1 day
-        )) as full_date
-    """)
-    
-    # Create dimension columns
-    dim_date = (
-        date_seq_df
-        .withColumn("date_key", date_format(col("full_date"), "yyyyMMdd").cast(IntegerType()))
-        .withColumn("year", year(col("full_date")))
-        .withColumn("month", month(col("full_date")))
-        .withColumn("quarter", quarter(col("full_date")))
-        .withColumn("day", dayofmonth(col("full_date")))
-        .select(
-            col("date_key"),
-            col("full_date"),
-            col("year"),
-            col("month"),
-            col("quarter"),
-            col("day")
-        )
-        .dropDuplicates(["date_key"])
-        .orderBy("date_key")
-    )
-    
-    return dim_date
-
-
-# =============================================================================
+# ==========================================
 # FACT TABLES
-# =============================================================================
+# ==========================================
 
-@asset("fact_reviews")
-def create_fact_reviews(spark: SparkSession) -> DataFrame:
-    """
-    Create fact_reviews fact table.
-    Grain: 1 row = 1 review (order_id + review_id)
+def transform_fact_sales(spark):
+    print("Transforming fact_sales...")
+    df_silver_orders = read_delta_table(spark, "silver", "silver_olist_orders_dataset")
+    df_silver_items = read_delta_table(spark, "silver", "silver_olist_order_items_dataset")
+    df_silver_payments = read_delta_table(spark, "silver", "silver_olist_order_payments_dataset")
+
+    df_sales_base = df_silver_items.join(df_silver_orders, on="order_id", how="inner")
+    df_payments_agg = df_silver_payments.groupBy("order_id").agg(F.sum("payment_value").alias("total_payment_value"))
+    df_sales_joined = df_sales_base.join(df_payments_agg, on="order_id", how="left")
     
-    Source: order_reviews
-    Columns: order_id, review_id, review_score, review_creation_date, review_answer_timestamp
-    """
-    # Read Silver reviews table
-    reviews_df = read_delta_table(spark, "silver", "silver_olist_order_reviews_dataset")
-    
-    # Read Gold dim_order for FK validation
-    dim_order = read_delta_table(spark, "gold", "dim_order")
-    
-    # Build fact table
-    fact_reviews = (
-        reviews_df
-        # Validate FK: order_id exists in dim_order
-        .join(
-            dim_order.select("order_id").distinct(),
-            "order_id",
-            "inner"
-        )
-        # Select final columns
-        .select(
-            col("order_id"),
-            col("review_id"),
-            col("review_score"),
-            col("review_creation_date"),
-            col("review_answer_timestamp")
-        )
-        .dropDuplicates(["order_id", "review_id"])
+    df_final = df_sales_joined.select(
+        F.col("order_id"), F.col("order_item_id"), F.col("product_id"), F.col("seller_id"), F.col("customer_id"), F.col("order_status"),
+        F.date_format(F.col("order_purchase_timestamp"), "yyyyMMdd").cast("int").alias("purchase_date_key"),
+        F.round(F.col("price"), 2).alias("price"),
+        F.round(F.col("freight_value"), 2).alias("freight_value"),
+        F.round(F.col("price") + F.col("freight_value"), 2).alias("total_item_value"),
+        F.round(F.col("total_payment_value"), 2).alias("total_payment_value")
     )
-    
-    return fact_reviews
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "fact_sales", mode="overwrite")
 
+def transform_fact_order_fulfillment(spark):
+    print("Transforming fact_order_fulfillment...")
+    df_silver_orders = read_delta_table(spark, "silver", "silver_olist_orders_dataset")
+    df_silver_reviews = read_delta_table(spark, "silver", "silver_olist_order_reviews_dataset")
 
-@asset("fact_sales")
-def create_fact_sales(spark: SparkSession) -> DataFrame:
-    """
-    Create fact_sales fact table.
-    Grain: 1 row = 1 order_item
+    df_fulfillment_base = df_silver_orders.join(df_silver_reviews, on="order_id", how="left")
     
-    Joins:
-    - order + order_item
-    - dim_customer (FK: customer_id)
-    - dim_product (FK: product_id)
-    - dim_seller (FK: seller_id)
-    - dim_order (FK: order_id)
-    - dim_date (FK: date_key based on order_purchase_timestamp)
-    """
-    # Read Silver tables (source data)
-    order_df = read_delta_table(spark, "silver", "silver_olist_orders_dataset")
-    order_item_df = read_delta_table(spark, "silver", "silver_olist_order_items_dataset")
-    payment_df = read_delta_table(spark, "silver", "silver_olist_order_payments_dataset")
+    df_final = df_fulfillment_base.select(
+        F.col("order_id"), F.col("customer_id"), F.col("review_id"), F.col("order_status"), F.col("review_score"),
+        F.date_format(F.col("order_purchase_timestamp"), "yyyyMMdd").cast("int").alias("purchase_date_key"),
+        F.date_format(F.col("order_estimated_delivery_date"), "yyyyMMdd").cast("int").alias("estimated_delivery_date_key"),
+        F.date_format(F.col("order_delivered_customer_date"), "yyyyMMdd").cast("int").alias("actual_delivery_date_key"),
+        F.datediff(F.col("order_delivered_customer_date"), F.col("order_estimated_delivery_date")).alias("delivery_delay_days"),
+        F.datediff(F.col("order_delivered_customer_date"), F.col("order_purchase_timestamp")).alias("shipping_duration_days")
+    ).withColumn("is_late_delivery", F.when(F.col("delivery_delay_days") > 0, 1).otherwise(0))
     
-    # Read Gold dimension tables for FK validation
-    dim_customer = read_delta_table(spark, "gold", "dim_customer")
-    dim_product = read_delta_table(spark, "gold", "dim_product")
-    dim_seller = read_delta_table(spark, "gold", "dim_seller")
-    dim_order = read_delta_table(spark, "gold", "dim_order")
-    dim_date = read_delta_table(spark, "gold", "dim_date")
-    
-    # Aggregate payment_value per order
-    payment_agg = (
-        payment_df
-        .groupBy("order_id")
-        .agg(spark_sum("payment_value").alias("payment_value"))
-    )
-    
-    # Prepare order with date_key
-    order_with_date = (
-        order_df
-        .withColumn(
-            "date_key", 
-            date_format(to_date(col("order_purchase_timestamp")), "yyyyMMdd").cast(IntegerType())
-        )
-        .select(
-            col("order_id"),
-            col("customer_id"),
-            col("date_key")
-        )
-    )
-    
-    # Build fact table starting from order_item (grain)
-    fact_sales = (
-        order_item_df
-        # Join with order to get customer_id and date_key
-        .join(order_with_date, "order_id", "inner")
-        # Join with payment aggregation
-        .join(payment_agg, "order_id", "left")
-        # Validate FK: customer_id exists in dim_customer
-        .join(
-            dim_customer.select("customer_id").distinct(),
-            "customer_id",
-            "inner"
-        )
-        # Validate FK: product_id exists in dim_product
-        .join(
-            dim_product.select("product_id").distinct(),
-            "product_id",
-            "inner"
-        )
-        # Validate FK: seller_id exists in dim_seller
-        .join(
-            dim_seller.select("seller_id").distinct(),
-            "seller_id",
-            "inner"
-        )
-        # Validate FK: order_id exists in dim_order
-        .join(
-            dim_order.select("order_id").distinct(),
-            "order_id",
-            "inner"
-        )
-        # Validate FK: date_key exists in dim_date
-        .join(
-            dim_date.select("date_key").distinct(),
-            "date_key",
-            "inner"
-        )
-        # Select final columns
-        .select(
-            col("order_id"),
-            col("order_item_id"),
-            col("customer_id"),
-            col("product_id"),
-            col("seller_id"),
-            col("date_key"),
-            col("price"),
-            col("freight_value"),
-            col("payment_value")
-        )
-    )
-    
-    return fact_sales
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "fact_order_fulfillment", mode="overwrite")
 
-
-# =============================================================================
-# ORCHESTRATION
-# =============================================================================
-
-def run_all_dimensions(spark: SparkSession) -> None:
-    """Run all dimension table transformations in correct order."""
-    print("\n" + "="*60)
-    print("STARTING DIMENSION TABLES CREATION")
-    print("="*60)
-    
-    create_dim_customer(spark)
-    create_dim_product(spark)
-    create_dim_seller(spark)
-    create_dim_order(spark)
-    create_dim_date(spark)
-    
-    print("\n✓ All dimension tables created successfully!")
-
-
-def run_fact_table(spark: SparkSession) -> None:
-    """Run fact table transformations (requires dimensions to exist)."""
-    print("\n" + "="*60)
-    print("STARTING FACT TABLES CREATION")
-    print("="*60)
-    
-    create_fact_reviews(spark)
-    create_fact_sales(spark)
-    
-    print("\n✓ All fact tables created successfully!")
-
-
-def run_all(spark: SparkSession) -> None:
-    """Run complete Gold layer transformation."""
-    print("\n" + "="*60)
-    print("STARTING GOLD LAYER - STAR SCHEMA TRANSFORMATION")
-    print("="*60)
-    
-    # Create dimensions first
-    run_all_dimensions(spark)
-    
-    # Then create fact table
-    run_fact_table(spark)
-    
-    print("\n" + "="*60)
-    print("GOLD LAYER TRANSFORMATION COMPLETED!")
-    print("="*60)
-
-
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
+# ==========================================
+# MAIN EXECUTION PIPELINE
+# ==========================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Gold Layer Transformations (Star Schema)")
-    parser.add_argument(
-        "--table", 
-        type=str, 
-        required=True,
-        choices=[
-            "dim_customer", "dim_product", "dim_seller", 
-            "dim_order", "dim_date", "fact_reviews", "fact_sales",
-            "dimensions", "fact", "all"
-        ],
-        help="Name of the table to transform or 'all' for complete transformation"
-    )
+    # Setup argument parser for Airflow/Docker integration
+    parser = argparse.ArgumentParser(description="Run Gold Layer Transformations")
+    parser.add_argument("--table", type=str, required=True, 
+                        help="Name of the table to transform (e.g., 'dim_products', 'fact_sales', 'all')")
     args = parser.parse_args()
 
     # Initialize Spark
-    spark = get_spark_session(app_name=f"GoldLayer-{args.table}")
+    spark = get_spark_session(app_name=f"GoldLayer-{args.table.capitalize()}")
 
-    try:
-        # Route to the correct transformation
-        if args.table == "dim_customer":
-            create_dim_customer(spark)
-        elif args.table == "dim_product":
-            create_dim_product(spark)
-        elif args.table == "dim_seller":
-            create_dim_seller(spark)
-        elif args.table == "dim_order":
-            create_dim_order(spark)
-        elif args.table == "dim_date":
-            create_dim_date(spark)
-        elif args.table == "fact_reviews":
-            create_fact_reviews(spark)
-        elif args.table == "fact_sales":
-            create_fact_sales(spark)
-        elif args.table == "dimensions":
-            run_all_dimensions(spark)
-        elif args.table == "fact":
-            run_fact_table(spark)
-        elif args.table == "all":
-            run_all(spark)
-        else:
-            print(f"Unknown table parameter: {args.table}")
-    finally:
-        spark.stop()
+    # Route to the correct function based on the argument
+    if args.table == "dim_products":
+        transform_dim_products(spark)
+    elif args.table == "dim_sellers":
+        transform_dim_sellers(spark)
+    elif args.table == "dim_customers":
+        transform_dim_customers(spark)
+    elif args.table == "dim_date":
+        transform_dim_date(spark)
+    elif args.table == "fact_sales":
+        transform_fact_sales(spark)
+    elif args.table == "fact_order_fulfillment":
+        transform_fact_order_fulfillment(spark)
+    elif args.table == "all":
+        print("========== Running complete Gold layer pipeline sequentially...")
+        transform_dim_products(spark)
+        transform_dim_sellers(spark)
+        transform_dim_customers(spark)
+        transform_dim_date(spark)
+        transform_fact_sales(spark)
+        transform_fact_order_fulfillment(spark)
+        print("========== Gold layer pipeline complete!")
+    else:
+        print(f"Unknown table parameter: {args.table}")
+
+    spark.stop()

@@ -26,9 +26,9 @@ Dựa trên bộ dữ liệu **Olist E-commerce** (Brazil), hệ thống Data La
    - Theo dõi sự biến động của doanh thu và số lượng đơn đặt hàng theo thời gian (tháng, quý, năm).
    - Phân tích các yếu tố thúc đẩy doanh thu chính theo khu vực địa lý tại Brazil và theo danh mục sản phẩm.
 
-2. **Đánh giá Hiệu suất Giao hàng:**
-   - So sánh thời gian giao hàng thực tế với thời gian giao hàng dự kiến.
-   - Phân tích ảnh hưởng của việc giao hàng chậm trễ đến mức độ hài lòng của khách hàng (thông qua điểm đánh giá - Review Scores).
+2. **Hiệu suất Vận hành & Trải nghiệm Khách hàng:**
+   - Đo lường hiệu suất chuỗi cung ứng: Phân tích tỷ lệ giao hàng đúng hạn (On-time Delivery), tỷ lệ trễ hạn, và thời gian vận chuyển trung bình từ người bán đến người mua.
+   - Đánh giá mức độ hài lòng tổng thể: Đo lường xu hướng của điểm đánh giá (Review Scores) và tìm ra sự tương quan (correlation) giữa các đơn hàng bị trễ hạn với trải nghiệm mua sắm chung của khách hàng.
 
 3. **Hiệu suất Sản phẩm & Người bán:**
    - Xác định danh sách các sản phẩm mang lại doanh thu cao nhất và thấp nhất.
