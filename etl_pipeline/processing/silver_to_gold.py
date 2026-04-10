@@ -32,7 +32,8 @@ def transform_dim_products(spark):
         F.col("product_height_cm"),
         F.col("product_width_cm")
     )
-    write_delta_table(df_final, "gold", "dim_products", mode="overwrite")
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_products", mode="overwrite")
 
 def transform_dim_sellers(spark):
     print("Transforming dim_sellers...")
@@ -54,7 +55,8 @@ def transform_dim_sellers(spark):
         F.col("seller_zip_code_prefix"), F.col("geolocation_lat").alias("seller_lat"), 
         F.col("geolocation_lng").alias("seller_lng")
     )
-    write_delta_table(df_final, "gold", "dim_sellers", mode="overwrite")
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_sellers", mode="overwrite")
 
 def transform_dim_customers(spark):
     print("Transforming dim_customers...")
@@ -76,7 +78,8 @@ def transform_dim_customers(spark):
         F.col("customer_state"), F.col("customer_zip_code_prefix"), 
         F.col("geolocation_lat").alias("customer_lat"), F.col("geolocation_lng").alias("customer_lng")
     )
-    write_delta_table(df_final, "gold", "dim_customers", mode="overwrite")
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_customers", mode="overwrite")
 
 def transform_dim_date(spark):
     print("Generating dim_date...")
@@ -98,7 +101,8 @@ def transform_dim_date(spark):
         F.year(F.col("full_date")).alias("year")
     ).withColumn("is_weekend", F.when(F.col("day_of_week").isin([1, 7]), True).otherwise(False))
     
-    write_delta_table(df_final, "gold", "dim_date", mode="overwrite")
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "dim_date", mode="overwrite")
 
 # ==========================================
 # FACT TABLES
@@ -122,7 +126,8 @@ def transform_fact_sales(spark):
         F.round(F.col("price") + F.col("freight_value"), 2).alias("total_item_value"),
         F.round(F.col("total_payment_value"), 2).alias("total_payment_value")
     )
-    write_delta_table(df_final, "gold", "fact_sales", mode="overwrite")
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "fact_sales", mode="overwrite")
 
 def transform_fact_order_fulfillment(spark):
     print("Transforming fact_order_fulfillment...")
@@ -140,7 +145,8 @@ def transform_fact_order_fulfillment(spark):
         F.datediff(F.col("order_delivered_customer_date"), F.col("order_purchase_timestamp")).alias("shipping_duration_days")
     ).withColumn("is_late_delivery", F.when(F.col("delivery_delay_days") > 0, 1).otherwise(0))
     
-    write_delta_table(df_final, "gold", "fact_order_fulfillment", mode="overwrite")
+    # OPTIMIZATION: coalesce(1) to avoid small files in S3
+    write_delta_table(df_final.coalesce(1), "gold", "fact_order_fulfillment", mode="overwrite")
 
 # ==========================================
 # MAIN EXECUTION PIPELINE
@@ -170,14 +176,14 @@ if __name__ == "__main__":
     elif args.table == "fact_order_fulfillment":
         transform_fact_order_fulfillment(spark)
     elif args.table == "all":
-        print("🚀 Running complete Gold layer pipeline sequentially...")
+        print("========== Running complete Gold layer pipeline sequentially...")
         transform_dim_products(spark)
         transform_dim_sellers(spark)
         transform_dim_customers(spark)
         transform_dim_date(spark)
         transform_fact_sales(spark)
         transform_fact_order_fulfillment(spark)
-        print("✅ Gold layer pipeline complete!")
+        print("========== Gold layer pipeline complete!")
     else:
         print(f"Unknown table parameter: {args.table}")
 
