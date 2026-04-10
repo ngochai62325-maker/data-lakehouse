@@ -18,13 +18,14 @@ Dựa trên kiến trúc dự án với Delta Lake, Spark, Airflow, AWS (S3, Glu
 **Vai trò:** (Data Architect) Thiết kế mô hình chuẩn hóa phục vụ phân tích.
 - **Gold Layer (Fact & Dimension):** Thực hiện Join các bảng Silver lại với nhau, phân rã và thiết kế theo dạng Star Schema (bảng lịch sử sự kiện Fact và các nhánh Dimension bổ trợ).
 - **Tối ưu hóa (Optimization):** Cải thiện tốc độ bằng cách ứng dụng Spark Partitioning, Repartition và Z-Ordering cho các bảng Gold trước khi lưu vào S3.
-- **Airflow DAG (Gold):** Hoàn thiện mắt xích Pipeline cuối cùng bằng cách viết DAG tự chạy bước Gold khi Silver đã xong.
+- **Airflow DAG (Gold):** Viết DAG tự động kích hoạt job Gold ngay khi Silver đã xong, là mắt xích kết nối giữa Silver và Platinum trong chuỗi pipeline.
 
 ## 🧑‍💻 Thành viên 4: Platinum Layer, Query & Power BI (Tầng Phân tích)
 **Vai trò:** (Data Analytics/BI) Tổng hợp số liệu cuối và Trực quan hóa thành báo cáo kinh doanh.
-- **Platinum Layer (BI-Ready):** Lấy mô hình Star Schema ở tầng Gold, dùng truy vấn SQL qua Amazon Athena (Ví dụ: tạo Views hoặc bảng CTAS) để rẽ nhánh ra các bảng đã tổng hợp/tính sẵn số liệu (nhóm RFM khách hàng, lợi nhuận khu vực...).
-- **Query Engine (Athena):** Đảm bảo Athena và AWS Glue map chuẩn schema của các tệp trên S3, sẵn sàng kết nối qua JDBC.
-- **Dashboard PowerBI:** Nối PowerBI thẳng vào tầng Platinum siêu nhanh này. Dùng DAX vẽ Dashboard và thuyết trình mạch lạc nốt 4 mục tiêu phân tích kinh doanh.
+- **Platinum Layer – Tạo Data Mart (BI-Ready):** Viết Spark job đọc dữ liệu từ các bảng Gold (Star Schema), thực hiện tổng hợp/tính toán sẵn các chỉ số kinh doanh (ví dụ: phân nhóm RFM khách hàng, tổng doanh thu theo khu vực, tỷ lệ giao hàng đúng hạn...) và lưu kết quả ra các **bảng Mart** dạng Delta Table trên S3 (tầng Platinum). Đây là bước tạo Data Mart thực sự để BI đọc siêu nhanh.
+- **Airflow DAG (Platinum):** Viết DAG kết nối tiếp nối với thành viên 3. Tự động kích hoạt Spark job tạo bảng Mart ngay khi job Gold hoàn tất, hoàn chỉnh chuỗi Pipeline: Bronze → Silver → Gold → Platinum.
+- **Query Engine (Athena):** Đảm bảo Athena và AWS Glue map chuẩn schema của các bảng Platinum trên S3, sẵn sàng kết nối qua JDBC cho PowerBI.
+- **Dashboard PowerBI:** Nối PowerBI thẳng vào tầng Platinum (đã tính toán sẵn). Dùng DAX vẽ Dashboard và thuyết trình mạch lạc 4 mục tiêu phân tích kinh doanh.
 
 ---
 ### 📋 Nguyên tắc phối hợp chung
