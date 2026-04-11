@@ -5,14 +5,11 @@ AWS Glue Data Catalog - Table Creation Script
 This module creates Glue tables for the Platinum layer to enable
 querying via Amazon Athena and connecting to Power BI.
 
-Platinum tables (7 marts):
-  - sales_summary_mart       : Daily sales KPIs
-  - customer_mart            : Customer-level behavior metrics
-  - product_mart             : Product-level performance
-  - fulfillment_mart         : Order-level delivery & review metrics
-  - geo_sales_mart           : Geographic revenue distribution
-  - kpi_summary              : Global pre-computed KPIs (single row)
-  - seller_performance_mart  : Seller-level performance metrics
+Platinum tables (4 marts):
+  - sales_summary_mart  : Daily sales KPIs
+  - customer_mart       : Customer-level behavior metrics
+  - product_mart        : Product-level performance
+  - kpi_summary         : Global pre-computed KPIs (single row)
 
 Usage:
     python -m etl_pipeline.utils.glue_catalog --action create --table all
@@ -115,42 +112,7 @@ PLATINUM_SCHEMAS: Dict[str, List[Dict[str, str]]] = {
         {"Name": "product_width_cm", "Type": "double"},
     ],
 
-    # ─── MART 4: Fulfillment ─────────────────────────────────────────────────
-    # Granularity: order_id
-    # Source: fact_order_fulfillment + dim_customers
-    "fulfillment_mart": [
-        {"Name": "order_id", "Type": "string"},
-        {"Name": "customer_id", "Type": "string"},
-        {"Name": "customer_city", "Type": "string"},
-        {"Name": "customer_state", "Type": "string"},
-        {"Name": "order_status", "Type": "string"},
-        {"Name": "purchase_date_key", "Type": "int"},
-        {"Name": "estimated_delivery_date_key", "Type": "int"},
-        {"Name": "actual_delivery_date_key", "Type": "int"},
-        {"Name": "delivery_delay_days", "Type": "int"},
-        {"Name": "shipping_duration_days", "Type": "int"},
-        {"Name": "is_late_delivery", "Type": "int"},
-        {"Name": "delivery_status", "Type": "string"},
-        {"Name": "review_id", "Type": "string"},
-        {"Name": "review_score", "Type": "int"},
-        {"Name": "is_positive_review", "Type": "int"},
-    ],
-
-    # ─── MART 5: Geo Sales ───────────────────────────────────────────────────
-    # Granularity: state + city
-    # Source: fact_sales + dim_customers
-    "geo_sales_mart": [
-        {"Name": "state", "Type": "string"},
-        {"Name": "city", "Type": "string"},
-        {"Name": "total_revenue", "Type": "double"},
-        {"Name": "total_orders", "Type": "bigint"},
-        {"Name": "total_items", "Type": "bigint"},
-        {"Name": "total_customers", "Type": "bigint"},
-        {"Name": "avg_order_value", "Type": "double"},
-        {"Name": "avg_freight", "Type": "double"},
-    ],
-
-    # ─── MART 6: KPI Summary ────────────────────────────────────────────────
+    # ─── MART 4: KPI Summary ────────────────────────────────────────────────
     # Granularity: single row (global KPIs)
     # Source: fact_sales + fact_order_fulfillment
     "kpi_summary": [
@@ -172,27 +134,8 @@ PLATINUM_SCHEMAS: Dict[str, List[Dict[str, str]]] = {
         {"Name": "repeat_customer_count", "Type": "bigint"},
         {"Name": "repeat_customer_rate_pct", "Type": "double"},
     ],
-
-    # ─── MART 7: Seller Performance ──────────────────────────────────────────
-    # Granularity: seller_id
-    # Source: fact_sales + fact_order_fulfillment + dim_sellers
-    "seller_performance_mart": [
-        {"Name": "seller_id", "Type": "string"},
-        {"Name": "seller_city", "Type": "string"},
-        {"Name": "seller_state", "Type": "string"},
-        {"Name": "seller_zip_code_prefix", "Type": "string"},
-        {"Name": "total_orders", "Type": "bigint"},
-        {"Name": "total_revenue", "Type": "double"},
-        {"Name": "total_items", "Type": "bigint"},
-        {"Name": "avg_order_value", "Type": "double"},
-        {"Name": "avg_item_price", "Type": "double"},
-        {"Name": "total_freight", "Type": "double"},
-        {"Name": "unique_customers", "Type": "bigint"},
-        {"Name": "avg_review_score", "Type": "double"},
-        {"Name": "total_reviews", "Type": "bigint"},
-        {"Name": "positive_review_rate_pct", "Type": "double"},
-    ],
 }
+
 
 
 # =============================================================================
