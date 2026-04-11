@@ -6,7 +6,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Set JAVA_HOME environment variable so Spark can find it
-ENV JAVA_HOME=/usr/lib/jvm/default-java
+# ENV JAVA_HOME=/usr/lib/jvm/default-java
 
 USER airflow
 COPY requirements.txt /tmp/requirements.txt
