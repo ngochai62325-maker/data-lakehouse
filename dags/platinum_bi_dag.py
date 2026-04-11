@@ -1,0 +1,164 @@
+from datetime import datetime, timedelta
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.operators.empty import EmptyOperator
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from airflow.sensors.external_task import ExternalTaskSensor
+
+from dag_config import (
+    get_default_args,
+    create_spark_submit_kwargs,
+    DAG_IDS,
+    DAG_SCHEDULES,
+    DAG_TAGS,
+    ETL_BASE_PATH,
+)
+
+
+# ─── Cấu hình mặc định ──────────────────────────────────────────────────────
+default_args = get_default_args(owner="thanhvien4", retries=2)
+
+# ─── Đường dẫn script Platinum (trong container Airflow) ─────────────────────
+PLATINUM_SCRIPT = f"{ETL_BASE_PATH}/processing/gold_to_platinum.py"
+
+# ─── Danh sách các mart cần build ────────────────────────────────────────────
+PLATINUM_MARTS = [
+    "sales_summary_mart",
+    "customer_mart",
+    "product_mart",
+    "fulfillment_mart",
+    "geo_sales_mart",
+    "kpi_summary",
+    "seller_performance_mart",
+]
+
+
+# ─── Hàm log ─────────────────────────────────────────────────────────────────
+def _log_platinum_start(**context):
+    """Ghi log khi Platinum pipeline bắt đầu."""
+    print("=" * 70)
+    print("  PLATINUM BI LAYER PIPELINE — BẮT ĐẦU")
+    print("=" * 70)
+    print(f"  DAG Run ID  : {context['dag_run'].run_id}")
+    print(f"  Run Type    : {context['dag_run'].run_type}")
+    print(f"  Thời gian   : {datetime.now().isoformat()}")
+    print(f"  Số mart     : {len(PLATINUM_MARTS)}")
+    print(f"  Danh sách   :")
+    for i, mart in enumerate(PLATINUM_MARTS, 1):
+        print(f"    {i}. {mart}")
+    print("=" * 70)
+
+
+def _log_platinum_end(**context):
+    """Ghi log khi Platinum pipeline hoàn tất."""
+    print("=" * 70)
+    print("  PLATINUM BI LAYER PIPELINE — HOÀN TẤT")
+    print("=" * 70)
+    print(f"  DAG Run ID  : {context['dag_run'].run_id}")
+    print(f"  Thời gian   : {datetime.now().isoformat()}")
+    print(f"  Tất cả {len(PLATINUM_MARTS)} mart đã được tạo thành công!")
+    print("=" * 70)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ĐỊNH NGHĨA DAG — PLATINUM BI LAYER
+# ═══════════════════════════════════════════════════════════════════════════════
+with DAG(
+    dag_id=DAG_IDS["platinum"],
+    default_args=default_args,
+    description="[TV4] Platinum BI Layer — Data Mart & KPI Transformations từ Gold",
+    schedule_interval=DAG_SCHEDULES["platinum"],
+    catchup=False,
+    max_active_runs=1,
+    tags=DAG_TAGS["platinum"],
+) as dag:
+
+    # ── Start ─────────────────────────────────────────────────────────────────
+    start = PythonOperator(
+        task_id="platinum_start",
+        python_callable=_log_platinum_start,
+    )
+
+    # ── Chờ Gold DAG hoàn tất ─────────────────────────────────────────────────
+    # ExternalTaskSensor đảm bảo Platinum chỉ chạy khi Gold đã xong
+    # execution_delta = 1h vì Platinum chạy 15:00 UTC, Gold chạy 14:00 UTC
+    wait_for_gold = ExternalTaskSensor(
+        task_id="wait_for_gold_completion",
+        external_dag_id=DAG_IDS["gold"],
+        external_task_id=None,              # None = chờ toàn bộ DAG hoàn tất
+        execution_delta=timedelta(hours=1), # Platinum schedule - Gold schedule
+        mode="poke",
+        poke_interval=60,                   # Kiểm tra mỗi 60 giây
+        timeout=7200,                       # Timeout sau 2 tiếng
+        soft_fail=False,                    # Fail DAG nếu Gold không xong
+    )
+
+    # ── Tạo các task cho từng mart ────────────────────────────────────────────
+    # Mỗi mart là một SparkSubmitOperator task riêng biệt
+    mart_tasks = {}
+
+    for mart_name in PLATINUM_MARTS:
+        task_id = f"platinum_{mart_name}"
+        
+        mart_tasks[mart_name] = SparkSubmitOperator(
+            task_id=task_id,
+            **create_spark_submit_kwargs(
+                application=PLATINUM_SCRIPT,
+                app_name=f"platinum_{mart_name}",
+                application_args=["--table", mart_name],
+            ),
+        )
+
+    # ── End ───────────────────────────────────────────────────────────────────
+    end = PythonOperator(
+        task_id="platinum_end",
+        python_callable=_log_platinum_end,
+    )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TASK DEPENDENCIES
+    # ══════════════════════════════════════════════════════════════════════════
+    #
+    #  Phase 1 (Parallel — independent base marts):
+    #    Sales Summary, Customer, Product, Fulfillment
+    #
+    #  Phase 2 (Depends on Sales + Customer):
+    #    Geo Sales Mart
+    #
+    #  Phase 3 (Depends on all marts):
+    #    KPI Summary, Seller Performance
+    #
+    # ══════════════════════════════════════════════════════════════════════════
+
+    # Phase 1: Base marts can run in parallel
+    phase1_tasks = [
+        mart_tasks["sales_summary_mart"],
+        mart_tasks["customer_mart"],
+        mart_tasks["product_mart"],
+        mart_tasks["fulfillment_mart"],
+    ]
+
+    # Phase 2: Geo mart depends on fact_sales + dim_customers (after phase 1 start)
+    phase2_tasks = [
+        mart_tasks["geo_sales_mart"],
+    ]
+
+    # Phase 3: KPI summary & seller performance depend on multiple sources
+    phase3_tasks = [
+        mart_tasks["kpi_summary"],
+        mart_tasks["seller_performance_mart"],
+    ]
+
+    # Wire dependencies
+    # start → wait_for_gold → phase1 (parallel) → phase2 → phase3 → end
+    start >> wait_for_gold >> phase1_tasks
+
+    for t in phase1_tasks:
+        t >> phase2_tasks
+
+    for t in phase2_tasks:
+        t >> phase3_tasks
+
+    for t in phase3_tasks:
+        t >> end

@@ -72,8 +72,8 @@ ETL_SCRIPTS = {
     # "aggregate_gold":      f"{ETL_BASE_PATH}/aggregation/aggregate_gold.py",
     # "validate_gold":       f"{ETL_BASE_PATH}/aggregation/validate_gold.py",
 
-    # ── Platinum Layer (TV4) ── Thêm đường dẫn khi có script
-    # "create_platinum":     f"{ETL_BASE_PATH}/platinum/create_platinum.py",
+    # ── Platinum Layer (TV4) ──
+    "gold_to_platinum":     f"{ETL_BASE_PATH}/processing/gold_to_platinum.py",
 }
 
 
