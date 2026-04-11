@@ -23,7 +23,6 @@ TABLE_KEYS = {
     "olist_sellers_dataset": "seller_id",
     "olist_geolocation_dataset": ["geolocation_zip_code_prefix", "geolocation_lat", "geolocation_lng"],
     "product_category_name_translation": "product_category_name",
-    "holidays_dataset": "date"
 }
 
 

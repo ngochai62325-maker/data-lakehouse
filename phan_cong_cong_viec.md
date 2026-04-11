@@ -1,37 +1,34 @@
 # Phân công công việc Dự án Data Lakehouse (Nhóm 6)
 
-Dựa trên kiến trúc dự án với Delta Lake, Spark, Airflow, AWS (S3, Glue, Athena) và PowerBI, công việc được chia phân bổ thành 4 giai đoạn chính để chia đều cho 4 thành viên như sau:
+Dựa trên kiến trúc dự án với Delta Lake, Spark, Airflow, AWS (S3, Glue, Athena) và PowerBI, công việc được phân bổ thành 4 giai đoạn chính để chia đều cho 4 thành viên như sau:
 
-## 🧑‍💻 Thành viên 1: Infrastructure, Orchestration & Metadata
-**Vai trò:** Thiết lập hạ tầng và hệ thống điều phối pipeline.
-- **Hạ tầng (Docker):** Thiết lập, tối ưu và bảo trì cấu hình Docker/Docker Compose gồm các dịch vụ Apache Spark, Airflow, Jupyter Notebook, cơ sở dữ liệu.
-- **Hạ tầng Đám mây:** Cấu hình lưu trữ AWS S3 và hệ thống quản lý siêu dữ liệu (Metadata) với AWS Glue Data Catalog.
-- **Điều phối (Airflow):** Viết các script tạo Airflow DAGs nhằm lập lịch trình (schedule) và quản lý luồng thực thi (dependencies) cho các Spark jobs.
-- **Giám sát:** Đảm bảo toàn bộ hệ thống cluster chạy ổn định và debug các luồng chạy bị lỗi.
+## 🧑‍💻 Thành viên 1: Infrastructure & Bronze Layer (Dữ liệu Raw)
+**Vai trò:** Xây dựng nền tảng và nạp dữ liệu bước đầu vào hệ thống.
+- **Hạ tầng (Docker & AWS):** Cài đặt môi trường chạy lập lịch (Docker Compose) chứa Spark, Airflow, Jupyter. Khởi tạo kho S3 bucket và AWS Glue Data Catalog cho cả nhóm xài.
+- **Bronze Layer (Ingestion):** Viết Spark job kéo data thô từ Olist dataset vào S3 (chuyển sang định dạng Delta Table). Đảm bảo cơ chế lấy dữ liệu toàn bộ và gia tăng.
+- **Airflow DAG (Bronze):** Lập trình file DAG bằng Python để tự động hóa/hẹn giờ chạy luồng Ingestion của chính mình.
 
-## 🧑‍💻 Thành viên 2: Data Ingestion & Bronze Layer (Dữ liệu thô)
-**Vai trò:** Xây dựng luồng kéo dữ liệu gốc (Olist dataset, API) vào hệ thống.
-- **Data Ingestion:** Viết Spark application/scripts để thu thập dữ liệu từ các nguồn cung cấp (File cục bộ, API...).
-- **Chiến lược nạp:** Xây dựng cơ chế nạp toàn bộ dữ liệu lần đầu (Full load) và nạp dữ liệu gia tăng (Incremental load).
-- **Bronze Layer (Raw Data):** Ghi toàn bộ dữ liệu thô (giữ nguyên gốc không chỉnh sửa) vào S3 dưới định dạng Delta Table.
-- **Kiểm định:** Đối chiếu đảm bảo dữ liệu ghi vào không bị mất mát hay sai lệch so với nguồn.
+## 🧑‍💻 Thành viên 2: Data Transformation & Silver Layer (Làm sạch dữ liệu)
+**Vai trò:** (Data Engineer) Trực tiếp chuẩn hóa và lọc sạch dữ liệu mỏ.
+- **Silver Layer (Cleaned Data):** Nhận dữ liệu Delta từ bảng Bronze, viết các module Spark chuyên làm sạch (xử lý null, bỏ trùng lặp rác, ép kiểu chuẩn về định dạng String/Timestamp).
+- **Quản lý chất lượng:** Đảm bảo dữ liệu luân chuyển vào Silver đạt mức hoàn hảo để làm "Single Source of Truth" (Nguồn dữ liệu chân lý).
+- **Airflow DAG (Silver):** Viết DAG kết nối tiếp nối với thành viên 1. Tự động kích hoạt job xử lý Silver ngay khi job Bronze kết thúc.
 
-## 🧑‍💻 Thành viên 3: Data Transformation & Silver Layer (Làm sạch dữ liệu)
-**Vai trò:** Chuẩn hóa, xử lý và làm sạch dữ liệu.
-- **Transform (Apache Spark):** Xây dựng các Spark jobs để đọc dữ liệu từ Bronze Layer.
-- **Làm sạch (Cleaning):** Loại bỏ dữ liệu rác, trùng lặp (deduplication), xử lý các giá trị NaN/Null, và làm mịn dữ liệu.
-- **Chuẩn hóa (Standardization):** Chuẩn hóa định dạng (schema, ngày tháng, kiểu chuỗi) theo quy chuẩn nghiệp vụ.
-- **Silver Layer:** Chuyển đổi và lưu trữ bản ghi chất lượng cao này trở lại S3 dưới dạng Delta Table làm nguồn dữ liệu đáng tin cậy.
+## 🧑‍💻 Thành viên 3: Data Modeling & Gold Layer (Mô hình dữ liệu)
+**Vai trò:** (Data Architect) Thiết kế mô hình chuẩn hóa phục vụ phân tích.
+- **Gold Layer (Fact & Dimension):** Thực hiện Join các bảng Silver lại với nhau, phân rã và thiết kế theo dạng Star Schema (bảng lịch sử sự kiện Fact và các nhánh Dimension bổ trợ).
+- **Tối ưu hóa (Optimization):** Cải thiện tốc độ bằng cách ứng dụng Spark Partitioning, Repartition và Z-Ordering cho các bảng Gold trước khi lưu vào S3.
+- **Airflow DAG (Gold):** Viết DAG tự động kích hoạt job Gold ngay khi Silver đã xong, là mắt xích kết nối giữa Silver và Platinum trong chuỗi pipeline.
 
-## 🧑‍💻 Thành viên 4: Data Modeling, Query Engine & Dashboard (Tầng phục vụ phân tích)
-**Vai trò:** Xây dựng mô hình dữ liệu tổng hợp và trực quan hóa lên báo cáo.
-- **Gold Layer (Fact & Dimension Tables):** Tổng hợp dữ liệu từ Silver Layer, mô hình hóa theo dạng Fact/Dim dựa trên các chỉ số (metrics) cần tính toán; lưu dữ liệu vào Gold Layer (Delta format).
-- **Trích xuất & Truy vấn:** Kết nối và cấu hình Amazon Athena làm Query Engine để truy vấn dữ liệu trực tiếp trên Data Lake S3 thông qua Glue Catalog.
-- **Consumption (Power BI):** Kết nối Power BI với tập dữ liệu sạch/Gold layer (thông qua Athena) để tạo các biểu đồ, dashboards và báo cáo kinh doanh.
-- **Tối ưu:** Tối ưu hóa để cải thiện tốc độ truy cập báo cáo (như thiết lập Partitioning khi ghi dữ liệu Gold).
+## 🧑‍💻 Thành viên 4: Platinum Layer, Query & Power BI (Tầng Phân tích)
+**Vai trò:** (Data Analytics/BI) Tổng hợp số liệu cuối và Trực quan hóa thành báo cáo kinh doanh.
+- **Platinum Layer – Tạo Data Mart (BI-Ready):** Viết Spark job đọc dữ liệu từ các bảng Gold (Star Schema), thực hiện tổng hợp/tính toán sẵn các chỉ số kinh doanh (ví dụ: phân nhóm RFM khách hàng, tổng doanh thu theo khu vực, tỷ lệ giao hàng đúng hạn...) và lưu kết quả ra các **bảng Mart** dạng Delta Table trên S3 (tầng Platinum). Đây là bước tạo Data Mart thực sự để BI đọc siêu nhanh.
+- **Airflow DAG (Platinum):** Viết DAG kết nối tiếp nối với thành viên 3. Tự động kích hoạt Spark job tạo bảng Mart ngay khi job Gold hoàn tất, hoàn chỉnh chuỗi Pipeline: Bronze → Silver → Gold → Platinum.
+- **Query Engine (Athena):** Đảm bảo Athena và AWS Glue map chuẩn schema của các bảng Platinum trên S3, sẵn sàng kết nối qua JDBC cho PowerBI.
+- **Dashboard PowerBI:** Nối PowerBI thẳng vào tầng Platinum (đã tính toán sẵn). Dùng DAX vẽ Dashboard và thuyết trình mạch lạc 4 mục tiêu phân tích kinh doanh.
 
 ---
 ### 📋 Nguyên tắc phối hợp chung
 - Cả nhóm sử dụng chung Git để quản lý source code (tạo branch riêng cho mỗi task).
-- Review code tập thể ở các pipeline nối tiếp nhau (Ví dụ TV2 chuyển giao cho TV3).
+- Review code tập thể ở các pipeline nối tiếp nhau (Ví dụ TV2 hoàn tất Sensor/DAG để DAG của TV3 chạy tiếp).
 - Cùng nhau hỗ trợ gỡ lỗi và kiểm thử toàn vẹn dữ liệu từ đầu vào tới báo cáo cuối.
