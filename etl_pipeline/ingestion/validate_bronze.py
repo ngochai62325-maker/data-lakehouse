@@ -7,8 +7,8 @@ from config.settings import S3_BRONZE, OLIST_TABLES
 from etl_pipeline.utils.spark_session import get_spark_session
 
 
-# Danh sách tất cả các bảng cần kiểm tra (bao gồm holidays)
-ALL_TABLES = OLIST_TABLES + ["holidays_dataset"]
+# Danh sách tất cả các bảng Olist cần kiểm tra
+ALL_TABLES = OLIST_TABLES
 
 
 def validate_bronze(spark, expected_counts=None):

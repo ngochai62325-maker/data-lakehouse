@@ -23,11 +23,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     SPARK_MASTER_URL: spark://spark-master:7077
+    JAVA_HOME: /usr/lib/jvm/default-java
   volumes:
     - ./dags:/opt/airflow/dags
     - ./etl_pipeline:/opt/airflow/etl_pipeline
     - ./config:/opt/airflow/config
     - ./dataset:/opt/airflow/dataset
+    - ./dataset:/opt/spark/dataset
     - airflow-logs:/opt/airflow/logs
   depends_on:
     airflow-db:
