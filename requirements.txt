@@ -5,3 +5,4 @@ python-dotenv==1.0.0
 apache-airflow==2.9.0
 pandas==2.1.0
 jupyter
+apache-airflow-providers-apache-spark
