@@ -102,7 +102,7 @@ DAG_SCHEDULES = {
     "silver":   None,           # Thay vì chạy theo lịch, sẽ chờ Master gọi
     "gold":     None,           # Thay vì chạy theo lịch, sẽ chờ Master gọi
     "platinum": None,           # Thay vì chạy theo lịch, sẽ chờ Master gọi
-    "master":   "0 12 * * *",   # 12:00 UTC (19:00 Giờ VN) hàng ngày (trigger luồng pipeline chính)
+    "master":   "0 17 * * *",   # 17:00 UTC (00:00 Giờ VN) hàng ngày (trigger luồng pipeline chính)
 }
 
 
