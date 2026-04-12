@@ -29,6 +29,7 @@ with DAG(
     schedule_interval=DAG_SCHEDULES["gold"], # Đã được cấu hình là None trong dag_config
     catchup=False,
     max_active_runs=1,
+    max_active_tasks=2, # Giới hạn 2 task chạy đồng thời để tránh tràn RAM (OOM)
     tags=DAG_TAGS["gold"],
 ) as dag:
 
@@ -47,6 +48,10 @@ with DAG(
                 application=SILVER_TO_GOLD_SCRIPT,
                 app_name=f"gold_{task_alias}",
                 application_args=["--table", table_name],
+                extra_conf={
+                    "spark.driver.memory": "512m", 
+                    "spark.executor.memory": "512m"
+                }
             ),
         )
 
