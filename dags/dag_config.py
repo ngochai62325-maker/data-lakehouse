@@ -98,10 +98,10 @@ DAG_IDS = {
 
 # Lịch chạy mặc định cho từng layer (Giờ UTC - Giờ VN trừ đi 7 tiếng)
 DAG_SCHEDULES = {
-    "bronze":   "0 12 * * *",   # 12:00 UTC (19:00 Giờ VN) hàng ngày
-    "silver":   "0 13 * * *",   # 13:00 UTC (20:00 Giờ VN) hàng ngày (sau bronze 1h)
-    "gold":     "0 14 * * *",   # 14:00 UTC (21:00 Giờ VN) hàng ngày (sau silver 1h)
-    "platinum": "0 15 * * *",   # 15:00 UTC (22:00 Giờ VN) hàng ngày (sau gold 1h)
+    "bronze":   None,           # Thay vì chạy theo lịch, sẽ chờ Master gọi
+    "silver":   None,           # Thay vì chạy theo lịch, sẽ chờ Master gọi
+    "gold":     None,           # Thay vì chạy theo lịch, sẽ chờ Master gọi
+    "platinum": None,           # Thay vì chạy theo lịch, sẽ chờ Master gọi
     "master":   "0 12 * * *",   # 12:00 UTC (19:00 Giờ VN) hàng ngày (trigger luồng pipeline chính)
 }
 
