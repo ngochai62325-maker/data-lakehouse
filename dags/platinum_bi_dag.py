@@ -78,19 +78,19 @@ with DAG(
         python_callable=_log_platinum_start,
     )
 
-    # ── Chờ Gold DAG hoàn tất ─────────────────────────────────────────────────
-    # ExternalTaskSensor đảm bảo Platinum chỉ chạy khi Gold đã xong
-    # execution_delta = 1h vì Platinum chạy 15:00 UTC, Gold chạy 14:00 UTC
-    wait_for_gold = ExternalTaskSensor(
-        task_id="wait_for_gold_completion",
-        external_dag_id=DAG_IDS["gold"],
-        external_task_id=None,              # None = chờ toàn bộ DAG hoàn tất
-        execution_delta=timedelta(hours=1), # Platinum schedule - Gold schedule
-        mode="poke",
-        poke_interval=60,                   # Kiểm tra mỗi 60 giây
-        timeout=7200,                       # Timeout sau 2 tiếng
-        soft_fail=False,                    # Fail DAG nếu Gold không xong
-    )
+    # # ── Chờ Gold DAG hoàn tất ─────────────────────────────────────────────────
+    # # ExternalTaskSensor đảm bảo Platinum chỉ chạy khi Gold đã xong
+    # # execution_delta = 1h vì Platinum chạy 15:00 UTC, Gold chạy 14:00 UTC
+    # wait_for_gold = ExternalTaskSensor(
+    #     task_id="wait_for_gold_completion",
+    #     external_dag_id=DAG_IDS["gold"],
+    #     external_task_id=None,              # None = chờ toàn bộ DAG hoàn tất
+    #     execution_delta=timedelta(hours=1), # Platinum schedule - Gold schedule
+    #     mode="poke",
+    #     poke_interval=60,                   # Kiểm tra mỗi 60 giây
+    #     timeout=7200,                       # Timeout sau 2 tiếng
+    #     soft_fail=False,                    # Fail DAG nếu Gold không xong
+    # )
 
     # ── Tạo các task cho từng mart ────────────────────────────────────────────
     # Mỗi mart là một SparkSubmitOperator task riêng biệt
@@ -141,7 +141,7 @@ with DAG(
 
     # Wire dependencies
     # start → wait_for_gold → phase1 (parallel) → phase2 → end
-    start >> wait_for_gold >> phase1_tasks
+    start >> phase1_tasks
 
     for t in phase1_tasks:
         t >> phase2_tasks

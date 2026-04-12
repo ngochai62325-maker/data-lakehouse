@@ -121,6 +121,9 @@ def create_spark_submit_kwargs(
     conf = {**SPARK_CONF}
     if extra_conf:
         conf.update(extra_conf)
+    
+    # Isolate Ivy caches by app_name to prevent race conditions during parallel execution
+    conf["spark.jars.ivy"] = f"/tmp/.ivy_{app_name}"
 
     env_vars = {**SPARK_ENV_VARS}
     if extra_env_vars:
