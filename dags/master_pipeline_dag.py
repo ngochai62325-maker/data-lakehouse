@@ -70,15 +70,15 @@ with DAG(
     )
 
     # ── Trigger Silver Transformation ─────────────────────────────────────────
-    # trigger_silver = TriggerDagRunOperator(
-    #     task_id="trigger_silver_transformation",
-    #     trigger_dag_id=DAG_IDS["silver"],
-    #     wait_for_completion=True,
-    #     poke_interval=30,
-    #     allowed_states=["success"],
-    #     failed_states=["failed"],
-    #     reset_dag_run=True,
-    # )
+    trigger_silver = TriggerDagRunOperator(
+        task_id="trigger_silver_transformation",
+        trigger_dag_id=DAG_IDS["silver"],
+        wait_for_completion=True,
+        poke_interval=30,
+        allowed_states=["success"],
+        failed_states=["failed"],
+        reset_dag_run=True,
+    )
 
     # ── Trigger Gold Aggregation ──────────────────────────────────────────────
     # trigger_gold = TriggerDagRunOperator(
@@ -109,4 +109,4 @@ with DAG(
     )
 
     #start >> trigger_bronze >> trigger_silver >> trigger_gold >> trigger_platinum >> end
-    start >> trigger_bronze >> end
+    start >> trigger_bronze >> trigger_silver >> end
