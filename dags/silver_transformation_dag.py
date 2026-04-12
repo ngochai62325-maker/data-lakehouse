@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from airflow import DAG
-from airflow.sensors.external_task import ExternalTaskSensor
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.operators.empty import EmptyOperator
 
@@ -36,19 +35,6 @@ with DAG(
     # ── Task 1: Bắt đầu ─────────────────────────────────────────────────────
     start = EmptyOperator(task_id="start")
 
-    # ── Task 2: Sensor chờ Bronze Layer DAG hoàn tất ─────────────────────────
-    # Task này sẽ liên tục kiểm tra trạng thái của bronze_ingestion DAG. 
-    # Nó chỉ thành công và cho phép đi tiếp khi DAG đó có state = 'success'.
-    wait_for_bronze_layer = ExternalTaskSensor(
-        task_id="wait_for_bronze_layer",
-        external_dag_id=DAG_IDS["bronze"],
-        external_task_id=None,  # Đợi toàn bộ DAG thay vì 1 task cụ thể
-        allowed_states=["success"],
-        failed_states=["failed", "skipped"],
-        mode="poke",
-        poke_interval=60,       # Kiểm tra mỗi phút 1 lần
-        timeout=3600,           # Timeout sau 1 giờ nếu bronze không xong
-    )
 
     # ── Task 3: Chạy script Spark chuyển đổi Bronze -> Silver ───────────────
     # Chúng ta nạp đối số --table all để xử lý toàn bộ các bảng trong script
@@ -65,4 +51,4 @@ with DAG(
     end = EmptyOperator(task_id="end")
 
     # ── Xác định luồng chạy (Pipeline Flow) ─────────────────────────────────
-    start >> wait_for_bronze_layer >> transform_bronze_to_silver >> end
+    start >> transform_bronze_to_silver >> end
