@@ -83,3 +83,79 @@ with DAG(
         task_fact_sales, 
         task_fact_order_fulfillment
     ] >> end_gold
+
+
+#-----------------------------------------------------------------------------------------------------------
+# dag base on master dag, trigger gold after silver, and gold depends on silver datasets
+# from airflow import DAG
+# from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+# from airflow.operators.empty import EmptyOperator
+# import dag_config  # Team generic config
+
+# # ─── 1. CONFIGURATION FROM MASTER ────────────────────────────────────────────
+# # We use the standardized ID and Tags from dag_config
+# DAG_ID = dag_config.DAG_IDS["gold"]
+# TAGS = dag_config.DAG_TAGS["gold"]
+
+# # Use the centralized default args helper
+# default_args = dag_config.get_default_args(
+#     owner="thanhvien3", 
+#     retries=1
+# )
+
+# # Use the path defined in your team's config dictionary
+# PYSPARK_SCRIPT_PATH = dag_config.ETL_SCRIPTS.get(
+#     "aggregate_gold", 
+#     f"{dag_config.ETL_BASE_PATH}/processing/silver_to_gold.py"
+# )
+
+# # ─── 2. DAG DEFINITION ───────────────────────────────────────────────────────
+# with DAG(
+#     dag_id=DAG_ID,
+#     default_args=default_args,
+#     # schedule is set to None because the Master DAG triggers this manually
+#     schedule=None, 
+#     catchup=False,
+#     tags=TAGS,
+# ) as dag:
+
+#     # --- START & END ---
+#     start_gold = EmptyOperator(task_id='start_gold')
+#     end_gold = EmptyOperator(task_id='end_gold')
+
+#     # ─── 3. TASK HELPER ──────────────────────────────────────────────────────
+#     def create_gold_task(table_name: str, task_alias: str):
+#         """
+#         Uses the team's create_spark_submit_kwargs to ensure Spark, Delta, 
+#         and S3 settings are identical across the whole team.
+#         """
+#         spark_kwargs = dag_config.create_spark_submit_kwargs(
+#             application=PYSPARK_SCRIPT_PATH,
+#             app_name=f"gold-{task_alias}",
+#             application_args=['--table', table_name]
+#         )
+        
+#         return SparkSubmitOperator(
+#             task_id=f'transform_{table_name}',
+#             **spark_kwargs
+#         )
+
+#     # --- DIMENSION TASKS ---
+#     task_dim_products = create_gold_task('dim_products', 'products')
+#     task_dim_sellers = create_gold_task('dim_sellers', 'sellers')
+#     task_dim_customers = create_gold_task('dim_customers', 'customers')
+#     task_dim_date = create_gold_task('dim_date', 'date')
+
+#     # --- FACT TASKS ---
+#     task_fact_sales = create_gold_task('fact_sales', 'sales')
+#     task_fact_order_fulfillment = create_gold_task('fact_order_fulfillment', 'fulfillment')
+
+#     # ─── 4. DEPENDENCIES ─────────────────────────────────────────────────────
+#     start_gold >> [
+#         task_dim_products, 
+#         task_dim_sellers, 
+#         task_dim_customers, 
+#         task_dim_date, 
+#         task_fact_sales, 
+#         task_fact_order_fulfillment
+#     ] >> end_gold
