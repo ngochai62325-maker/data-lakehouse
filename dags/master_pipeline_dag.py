@@ -81,15 +81,15 @@ with DAG(
     )
 
     # ── Trigger Gold Aggregation ──────────────────────────────────────────────
-    # trigger_gold = TriggerDagRunOperator(
-    #     task_id="trigger_gold_aggregation",
-    #     trigger_dag_id=DAG_IDS["gold"],
-    #     wait_for_completion=True,
-    #     poke_interval=30,
-    #     allowed_states=["success"],
-    #     failed_states=["failed"],
-    #     reset_dag_run=True,
-    # )
+    trigger_gold = TriggerDagRunOperator(
+        task_id="trigger_gold_aggregation",
+        trigger_dag_id=DAG_IDS["gold"],
+        wait_for_completion=True,
+        poke_interval=30,
+        allowed_states=["success"],
+        failed_states=["failed"],
+        reset_dag_run=True,
+    )
 
     # ── Trigger Platinum BI ───────────────────────────────────────────────────
     # trigger_platinum = TriggerDagRunOperator(
@@ -109,4 +109,4 @@ with DAG(
     )
 
     #start >> trigger_bronze >> trigger_silver >> trigger_gold >> trigger_platinum >> end
-    start >> trigger_bronze >> trigger_silver >> end
+    start >> trigger_bronze >> trigger_silver >> trigger_gold >> end
