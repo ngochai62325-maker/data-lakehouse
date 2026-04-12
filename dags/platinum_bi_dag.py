@@ -23,14 +23,12 @@ default_args = get_default_args(owner="thanhvien4", retries=2)
 PLATINUM_SCRIPT = f"{ETL_BASE_PATH}/processing/gold_to_platinum.py"
 
 # ─── Danh sách các mart cần build ────────────────────────────────────────────
+# Khớp với MARTS dict trong gold_to_platinum.py (4 marts)
 PLATINUM_MARTS = [
     "sales_summary_mart",
     "customer_mart",
     "product_mart",
-    "fulfillment_mart",
-    "geo_sales_mart",
     "kpi_summary",
-    "seller_performance_mart",
 ]
 
 
@@ -121,13 +119,11 @@ with DAG(
     # ══════════════════════════════════════════════════════════════════════════
     #
     #  Phase 1 (Parallel — independent base marts):
-    #    Sales Summary, Customer, Product, Fulfillment
+    #    Sales Summary, Customer, Product
     #
-    #  Phase 2 (Depends on Sales + Customer):
-    #    Geo Sales Mart
-    #
-    #  Phase 3 (Depends on all marts):
-    #    KPI Summary, Seller Performance
+    #  Phase 2 (Depends on all base marts):
+    #    KPI Summary (uses fact_sales + fact_order_fulfillment,
+    #    runs after base marts to ensure consistency)
     #
     # ══════════════════════════════════════════════════════════════════════════
 
@@ -136,29 +132,19 @@ with DAG(
         mart_tasks["sales_summary_mart"],
         mart_tasks["customer_mart"],
         mart_tasks["product_mart"],
-        mart_tasks["fulfillment_mart"],
     ]
 
-    # Phase 2: Geo mart depends on fact_sales + dim_customers (after phase 1 start)
+    # Phase 2: KPI summary aggregates global metrics — run after base marts
     phase2_tasks = [
-        mart_tasks["geo_sales_mart"],
-    ]
-
-    # Phase 3: KPI summary & seller performance depend on multiple sources
-    phase3_tasks = [
         mart_tasks["kpi_summary"],
-        mart_tasks["seller_performance_mart"],
     ]
 
     # Wire dependencies
-    # start → wait_for_gold → phase1 (parallel) → phase2 → phase3 → end
+    # start → wait_for_gold → phase1 (parallel) → phase2 → end
     start >> wait_for_gold >> phase1_tasks
 
     for t in phase1_tasks:
         t >> phase2_tasks
 
     for t in phase2_tasks:
-        t >> phase3_tasks
-
-    for t in phase3_tasks:
         t >> end
