@@ -8,7 +8,7 @@ from airflow.operators.empty import EmptyOperator
 from dag_config import (
     get_default_args,
     create_spark_submit_kwargs,
-    ETL_BASE_PATH,
+    ETL_SCRIPTS,
     DAG_IDS,
     DAG_SCHEDULES,
     DAG_TAGS,
@@ -16,9 +16,6 @@ from dag_config import (
 
 # Khởi tạo đối số mặc định cho cấu trúc luồng DAG, thiết lập quyền sở hữu
 default_args = get_default_args(owner="thanhvien2")
-
-# Đường dẫn tuyệt đối gốc trỏ tới tệp mã nguồn xử lý PySpark biến đổi lớp Bronze sang Silver
-BRONZE_TO_SILVER_SCRIPT = f"{ETL_BASE_PATH}/processing/bronze_to_silver.py"
 
 with DAG(
     dag_id=DAG_IDS["silver"],
@@ -49,7 +46,7 @@ with DAG(
     transform_bronze_to_silver = SparkSubmitOperator(
         task_id="transform_bronze_to_silver_all",
         **create_spark_submit_kwargs(
-            application=BRONZE_TO_SILVER_SCRIPT,
+            application=ETL_SCRIPTS["transform_silver"],
             app_name="silver_transformation_all_tables",
             application_args=["--table", "all"],
         ),
