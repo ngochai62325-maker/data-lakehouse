@@ -1,8 +1,26 @@
+"""
+Platinum Layer (BI Layer) — PySpark Transformations
+====================================================
+
+Transforms Gold layer data into optimized data marts for BI tools
+(Power BI, Athena). Part of the Medallion Architecture:
+
+    Bronze → Silver → Gold → **Platinum**
+
+Data Marts:
+    1. sales_summary_mart  — Daily sales KPIs (time-series)
+    2. customer_mart        — Customer-level behavior metrics
+    3. product_mart         — Product-level performance
+    4. kpi_summary          — Global headline KPIs (single row)
+
+Usage:
+    python -m etl_pipeline.processing.gold_to_platinum --table all
+    python -m etl_pipeline.processing.gold_to_platinum --table sales_summary_mart
+"""
+
 import sys
 import os
 import argparse
-from functools import wraps
-from typing import Dict, Any, Callable
 
 # --- PATH FIX ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,8 +31,10 @@ if root_dir not in sys.path:
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
-    col, countDistinct, sum as spark_sum, avg as spark_avg, count
+    col, countDistinct, count, lit, round as spark_round, when,
+    max as spark_max, sum as spark_sum, avg as spark_avg, lag
 )
+from pyspark.sql.window import Window
 
 from etl_pipeline.utils.spark_session import get_spark_session
 from etl_pipeline.utils.s3_reader import read_delta_table
@@ -22,446 +42,335 @@ from etl_pipeline.utils.s3_writer import write_delta_table
 
 
 # =============================================================================
-# ASSET DECORATOR
+# SCHEMA NORMALIZATION — Tránh lỗi HIVE_BAD_DATA khi query bằng Athena
+# =============================================================================
+#
+# Vấn đề: Spark có thể ghi Parquet với type INT32, nhưng Glue Catalog
+#          định nghĩa DOUBLE → Athena reject file → lỗi toàn bộ mart.
+#
+# Giải pháp: Cast toàn bộ column theo quy tắc nhất quán trước khi write.
 # =============================================================================
 
-def asset(table_name: str):
+# Mapping: tên cột → Spark type (khớp 100% với Glue Catalog)
+SCHEMA_OVERRIDES = {
+    # ---------- Sales Summary Mart ----------
+    "purchase_date_key":          "int",
+    "full_date":                  "date",
+    "year":                       "int",
+    "month":                      "int",
+    "quarter":                    "int",
+    "day_of_week":                "int",
+    "day_name":                   "string",
+    "is_weekend":                 "boolean",
+    "total_revenue":              "double",
+    "total_payment":              "double",
+    "total_orders":               "long",      # Spark long = Athena bigint
+    "total_items":                "long",
+    "avg_order_value":            "double",
+    "avg_item_price":             "double",
+    "total_freight":              "double",
+    "revenue_day_growth_pct":     "double",
+
+    # ---------- Customer Mart ----------
+    "customer_id":                "string",
+    "customer_unique_id":         "string",
+    "customer_city":              "string",
+    "customer_state":             "string",
+    "customer_zip_code_prefix":   "string",
+    "total_spent":                "double",
+    "total_items_purchased":      "long",
+    "total_freight_paid":         "double",
+    "last_purchase_date_key":     "int",
+    "last_purchase_date":         "date",
+    "is_repeat_customer":         "int",
+
+    # ---------- Product Mart ----------
+    "product_id":                 "string",
+    "category":                   "string",
+    "total_sales":                "double",
+    "total_quantity":             "long",
+    "avg_price":                  "double",
+    "avg_freight":                "double",
+    "product_weight_g":           "double",
+    "product_length_cm":          "double",
+    "product_height_cm":          "double",
+    "product_width_cm":           "double",
+
+    # ---------- KPI Summary ----------
+    "total_customers":            "long",
+    "total_sellers":              "long",
+    "total_products":             "long",
+    "revenue_per_customer":       "double",
+    "avg_delivery_time_days":     "double",
+    "avg_delivery_delay_days":    "double",
+    "late_delivery_rate_pct":     "double",
+    "on_time_delivery_rate_pct":  "double",
+    "avg_review_score":           "double",
+    "positive_review_rate_pct":   "double",
+    "total_reviews":              "long",
+    "repeat_customer_count":      "long",
+    "repeat_customer_rate_pct":   "double",
+}
+
+
+def normalize_schema(df: DataFrame) -> DataFrame:
     """
-    Decorator to register a function as a Platinum layer asset.
-    Provides metadata logging: table_name, row_count, column_count, columns.
-    """
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(spark: SparkSession, *args, **kwargs) -> DataFrame:
-            print(f"\n{'='*60}")
-            print(f"Processing Asset: {table_name}")
-            print(f"{'='*60}")
-            
-            # Execute transformation
-            df = func(spark, *args, **kwargs)
-            
-            # Write to Platinum layer
-            write_delta_table(df, "platinum", table_name, mode="overwrite")
-            
-            # Log metadata
-            metadata = get_metadata(df, table_name)
-            log_metadata(metadata)
-            
-            return df
-        
-        wrapper.table_name = table_name
-        wrapper.is_asset = True
-        return wrapper
-    return decorator
-
-
-def get_metadata(df: DataFrame, table_name: str) -> Dict[str, Any]:
-    """Extract metadata from DataFrame."""
-    return {
-        "table_name": table_name,
-        "row_count": df.count(),
-        "column_count": len(df.columns),
-        "columns": df.columns
-    }
-
-
-def log_metadata(metadata: Dict[str, Any]) -> None:
-    """Log metadata to console."""
-    print(f"\n--- Metadata for {metadata['table_name']} ---")
-    print(f"  Table Name   : {metadata['table_name']}")
-    print(f"  Row Count    : {metadata['row_count']:,}")
-    print(f"  Column Count : {metadata['column_count']}")
-    print(f"  Columns      : {', '.join(metadata['columns'])}")
-    print("-" * 40)
-
-
-# =============================================================================
-# DATA MART: MART_SALES (Main Denormalized Table)
-# =============================================================================
-
-@asset("mart_sales")
-def create_mart_sales(spark: SparkSession) -> DataFrame:
-    """
-    Create mart_sales - main denormalized table for BI.
-    Joins all dimension tables with fact_sales for easy querying.
+    Cast toàn bộ column của DataFrame theo SCHEMA_OVERRIDES.
+    Column nào không có trong map → giữ nguyên type gốc.
     
-    Output columns:
-    - order_id, customer_id, customer_city, customer_state
-    - product_id, product_category_name_english
-    - seller_id, seller_state
-    - date_key, year, month
-    - order_status, payment_type
-    - price, freight_value, payment_value
+    Đảm bảo Parquet output khớp 100% với Glue Catalog schema,
+    tránh lỗi HIVE_BAD_DATA khi query bằng Athena / Power BI.
     """
-    # Read Gold layer tables
-    fact_sales = read_delta_table(spark, "gold", "fact_sales")
-    dim_customer = read_delta_table(spark, "gold", "dim_customer")
-    dim_product = read_delta_table(spark, "gold", "dim_product")
-    dim_seller = read_delta_table(spark, "gold", "dim_seller")
-    dim_order = read_delta_table(spark, "gold", "dim_order")
-    dim_date = read_delta_table(spark, "gold", "dim_date")
-    
-    # Build mart_sales with all necessary joins
-    mart_sales = (
-        fact_sales
-        # Join with dim_customer
-        .join(
-            dim_customer.select(
-                col("customer_id"),
-                col("customer_city"),
-                col("customer_state")
-            ),
-            "customer_id",
-            "inner"
-        )
-        # Join with dim_product
-        .join(
-            dim_product.select(
-                col("product_id"),
-                col("product_category_name_english")
-            ),
-            "product_id",
-            "inner"
-        )
-        # Join with dim_seller
-        .join(
-            dim_seller.select(
-                col("seller_id"),
-                col("seller_state")
-            ),
-            "seller_id",
-            "inner"
-        )
-        # Join with dim_order
-        .join(
-            dim_order.select(
-                col("order_id"),
-                col("order_status"),
-                col("payment_type")
-            ),
-            "order_id",
-            "inner"
-        )
-        # Join with dim_date
-        .join(
-            dim_date.select(
-                col("date_key"),
-                col("year"),
-                col("month")
-            ),
-            "date_key",
-            "inner"
-        )
-        # Select final columns in logical order
-        .select(
-            col("order_id"),
-            col("customer_id"),
-            col("customer_city"),
-            col("customer_state"),
-            col("product_id"),
-            col("product_category_name_english"),
-            col("seller_id"),
-            col("seller_state"),
-            col("date_key"),
-            col("year"),
-            col("month"),
-            col("order_status"),
-            col("payment_type"),
-            col("price"),
-            col("freight_value"),
-            col("payment_value")
-        )
-    )
-    
-    return mart_sales
+    cast_cols = []
+    for field in df.schema.fields:
+        target_type = SCHEMA_OVERRIDES.get(field.name)
+        if target_type and str(field.dataType).lower().replace("type", "") != target_type:
+            cast_cols.append(col(field.name).cast(target_type).alias(field.name))
+        else:
+            cast_cols.append(col(field.name))
+    return df.select(*cast_cols)
 
 
 # =============================================================================
-# KPI TABLES
+# MART 1: SALES SUMMARY — Daily sales KPIs
+# Granularity: purchase_date_key (ngày)
 # =============================================================================
 
-@asset("mart_kpi_daily")
-def create_mart_kpi_daily(spark: SparkSession) -> DataFrame:
-    """
-    Create mart_kpi_daily - daily KPI aggregation for dashboard.
-    
-    Group by: date_key, year, month
-    Metrics:
-    - total_orders: COUNT(DISTINCT order_id)
-    - total_revenue: SUM(payment_value)
-    - total_items: COUNT(order_item_id)
-    - avg_order_value: total_revenue / total_orders
-    """
-    # Read Gold layer fact_sales
+def create_sales_summary_mart(spark: SparkSession) -> DataFrame:
+    """KPIs: total_revenue, total_orders, avg_order_value, MoM growth..."""
     fact_sales = read_delta_table(spark, "gold", "fact_sales")
     dim_date = read_delta_table(spark, "gold", "dim_date")
-    
-    # Aggregate KPIs by date
-    mart_kpi_daily = (
+
+    # Aggregate theo ngày
+    daily = (
         fact_sales
-        .join(
-            dim_date.select("date_key", "year", "month"),
-            "date_key",
-            "inner"
+        .groupBy("purchase_date_key")
+        .agg(
+            spark_sum("total_item_value").alias("total_revenue"),
+            spark_sum("total_payment_value").alias("total_payment"),
+            countDistinct("order_id").alias("total_orders"),
+            count("order_item_id").alias("total_items"),
+            spark_avg("price").alias("avg_item_price"),
+            spark_sum("freight_value").alias("total_freight"),
         )
-        .groupBy("date_key", "year", "month")
+        .withColumn("avg_order_value", spark_round(col("total_revenue") / col("total_orders"), 2))
+        .withColumn("total_revenue",   spark_round(col("total_revenue"), 2))
+        .withColumn("total_payment",   spark_round(col("total_payment"), 2))
+        .withColumn("avg_item_price",  spark_round(col("avg_item_price"), 2))
+        .withColumn("total_freight",   spark_round(col("total_freight"), 2))
+    )
+
+    # Join dim_date → lấy calendar attributes
+    result = daily.join(
+        dim_date.select("date_key", "full_date", "year", "month",
+                        "quarter", "day_of_week", "day_name", "is_weekend"),
+        daily["purchase_date_key"] == dim_date["date_key"], "inner"
+    ).drop("date_key")
+
+    # Revenue day-over-day growth %
+    w = Window.orderBy("purchase_date_key")
+    result = (
+        result
+        .withColumn("_prev", lag("total_revenue", 1).over(w))
+        .withColumn(
+            "revenue_day_growth_pct",
+            spark_round(
+                when((col("_prev").isNotNull()) & (col("_prev") != 0),
+                     ((col("total_revenue") - col("_prev")) / col("_prev")) * 100
+                ).otherwise(lit(None)), 2
+            )
+        )
+        .drop("_prev")
+        .orderBy("purchase_date_key")
+    )
+
+    return normalize_schema(result)
+
+
+# =============================================================================
+# MART 2: CUSTOMER — Customer-level behavior metrics
+# Granularity: customer_id
+# =============================================================================
+
+def create_customer_mart(spark: SparkSession) -> DataFrame:
+    """KPIs: total_spent, total_orders, avg_order_value, is_repeat..."""
+    fact_sales = read_delta_table(spark, "gold", "fact_sales")
+    dim_customers = read_delta_table(spark, "gold", "dim_customers")
+    dim_date = read_delta_table(spark, "gold", "dim_date")
+
+    cust = (
+        fact_sales
+        .groupBy("customer_id")
         .agg(
             countDistinct("order_id").alias("total_orders"),
-            spark_sum("payment_value").alias("total_revenue"),
-            count("order_item_id").alias("total_items")
+            spark_sum("total_item_value").alias("total_spent"),
+            count("order_item_id").alias("total_items_purchased"),
+            spark_sum("freight_value").alias("total_freight_paid"),
+            spark_max("purchase_date_key").alias("last_purchase_date_key"),
+            spark_avg("price").alias("avg_item_price"),
         )
-        .withColumn(
-            "avg_order_value",
-            col("total_revenue") / col("total_orders")
-        )
-        .select(
-            col("date_key"),
-            col("year"),
-            col("month"),
-            col("total_orders"),
-            col("total_revenue"),
-            col("total_items"),
-            col("avg_order_value")
-        )
-        .orderBy("date_key")
+        .withColumn("avg_order_value",   spark_round(col("total_spent") / col("total_orders"), 2))
+        .withColumn("total_spent",       spark_round(col("total_spent"), 2))
+        .withColumn("total_freight_paid", spark_round(col("total_freight_paid"), 2))
+        .withColumn("avg_item_price",    spark_round(col("avg_item_price"), 2))
+        .withColumn("is_repeat_customer", when(col("total_orders") > 1, lit(1)).otherwise(lit(0)))
     )
-    
-    return mart_kpi_daily
 
-
-@asset("mart_top_products")
-def create_mart_top_products(spark: SparkSession) -> DataFrame:
-    """
-    Create mart_top_products - product performance analysis.
-    
-    Group by: product_id, product_category_name_english
-    Metrics:
-    - total_sales: SUM(payment_value)
-    - total_items: COUNT(order_item_id)
-    """
-    # Read Gold layer tables
-    fact_sales = read_delta_table(spark, "gold", "fact_sales")
-    dim_product = read_delta_table(spark, "gold", "dim_product")
-    
-    # Aggregate by product
-    mart_top_products = (
-        fact_sales
-        .join(
-            dim_product.select("product_id", "product_category_name_english"),
-            "product_id",
-            "inner"
-        )
-        .groupBy("product_id", "product_category_name_english")
-        .agg(
-            spark_sum("payment_value").alias("total_sales"),
-            count("order_item_id").alias("total_items")
-        )
+    result = (
+        cust
+        .join(dim_customers.select("customer_id", "customer_unique_id",
+              "customer_city", "customer_state", "customer_zip_code_prefix"),
+              "customer_id", "inner")
+        .join(dim_date.select(col("date_key").alias("_dk"), col("full_date").alias("last_purchase_date")),
+              col("last_purchase_date_key") == col("_dk"), "left")
+        .drop("_dk")
         .select(
-            col("product_id"),
-            col("product_category_name_english"),
-            col("total_sales"),
-            col("total_items")
-        )
-        .orderBy(col("total_sales").desc())
-    )
-    
-    return mart_top_products
-
-
-@asset("mart_customer_analysis")
-def create_mart_customer_analysis(spark: SparkSession) -> DataFrame:
-    """
-    Create mart_customer_analysis - customer behavior analysis.
-    
-    Group by: customer_id, customer_state
-    Metrics:
-    - total_orders: COUNT(DISTINCT order_id)
-    - total_spent: SUM(payment_value)
-    - avg_order_value: total_spent / total_orders
-    """
-    # Read Gold layer tables
-    fact_sales = read_delta_table(spark, "gold", "fact_sales")
-    dim_customer = read_delta_table(spark, "gold", "dim_customer")
-    
-    # Aggregate by customer
-    mart_customer_analysis = (
-        fact_sales
-        .join(
-            dim_customer.select("customer_id", "customer_state"),
-            "customer_id",
-            "inner"
-        )
-        .groupBy("customer_id", "customer_state")
-        .agg(
-            countDistinct("order_id").alias("total_orders"),
-            spark_sum("payment_value").alias("total_spent")
-        )
-        .withColumn(
-            "avg_order_value",
-            col("total_spent") / col("total_orders")
-        )
-        .select(
-            col("customer_id"),
-            col("customer_state"),
-            col("total_orders"),
-            col("total_spent"),
-            col("avg_order_value")
+            "customer_id", "customer_unique_id", "customer_city",
+            "customer_state", "customer_zip_code_prefix",
+            "total_orders", "total_spent", "avg_order_value",
+            "total_items_purchased", "total_freight_paid", "avg_item_price",
+            "last_purchase_date_key", "last_purchase_date", "is_repeat_customer",
         )
         .orderBy(col("total_spent").desc())
     )
-    
-    return mart_customer_analysis
+
+    return normalize_schema(result)
 
 
-@asset("mart_seller_performance")
-def create_mart_seller_performance(spark: SparkSession) -> DataFrame:
-    """
-    Create mart_seller_performance - seller performance analysis.
-    
-    Group by: seller_id, seller_state
-    Metrics:
-    - total_orders: COUNT(DISTINCT order_id)
-    - total_revenue: SUM(payment_value)
-    - avg_review_score: AVG(review_score) from fact_reviews
-    """
-    # Read Gold layer tables
+# =============================================================================
+# MART 3: PRODUCT — Product-level performance
+# Granularity: product_id
+# =============================================================================
+
+def create_product_mart(spark: SparkSession) -> DataFrame:
+    """KPIs: total_sales, total_quantity, avg_price, category..."""
     fact_sales = read_delta_table(spark, "gold", "fact_sales")
-    fact_reviews = read_delta_table(spark, "gold", "fact_reviews")
-    dim_seller = read_delta_table(spark, "gold", "dim_seller")
-    
-    # Calculate seller sales metrics
-    seller_sales = (
+    dim_products = read_delta_table(spark, "gold", "dim_products")
+
+    prod = (
         fact_sales
-        .join(
-            dim_seller.select("seller_id", "seller_state"),
-            "seller_id",
-            "inner"
-        )
-        .groupBy("seller_id", "seller_state")
+        .groupBy("product_id")
         .agg(
+            spark_sum("total_item_value").alias("total_sales"),
+            count("order_item_id").alias("total_quantity"),
             countDistinct("order_id").alias("total_orders"),
-            spark_sum("payment_value").alias("total_revenue")
+            spark_avg("price").alias("avg_price"),
+            spark_avg("freight_value").alias("avg_freight"),
+            spark_sum("freight_value").alias("total_freight"),
         )
+        .withColumn("total_sales",   spark_round(col("total_sales"), 2))
+        .withColumn("avg_price",     spark_round(col("avg_price"), 2))
+        .withColumn("avg_freight",   spark_round(col("avg_freight"), 2))
+        .withColumn("total_freight", spark_round(col("total_freight"), 2))
     )
-    
-    # Calculate avg review score per seller (via order_id)
-    seller_reviews = (
-        fact_sales
-        .select("seller_id", "order_id")
-        .distinct()
-        .join(
-            fact_reviews.select("order_id", "review_score"),
-            "order_id",
-            "inner"
-        )
-        .groupBy("seller_id")
-        .agg(
-            spark_avg("review_score").alias("avg_review_score")
-        )
-    )
-    
-    # Join sales and reviews
-    mart_seller_performance = (
-        seller_sales
-        .join(seller_reviews, "seller_id", "left")
+
+    result = (
+        prod
+        .join(dim_products.select(
+            "product_id",
+            col("product_category_en").alias("category"),
+            "product_weight_g", "product_length_cm",
+            "product_height_cm", "product_width_cm"),
+            "product_id", "inner")
         .select(
-            col("seller_id"),
-            col("seller_state"),
-            col("total_orders"),
-            col("total_revenue"),
-            col("avg_review_score")
+            "product_id", "category", "total_sales", "total_quantity",
+            "total_orders", "avg_price", "avg_freight", "total_freight",
+            "product_weight_g", "product_length_cm",
+            "product_height_cm", "product_width_cm",
         )
-        .orderBy(col("total_revenue").desc())
+        .orderBy(col("total_sales").desc())
     )
-    
-    return mart_seller_performance
+
+    return normalize_schema(result)
 
 
 # =============================================================================
-# ORCHESTRATION
+# MART 4: KPI SUMMARY — Global headline KPIs (single row)
 # =============================================================================
 
-def run_mart_sales(spark: SparkSession) -> None:
-    """Run mart_sales transformation."""
-    print("\n" + "="*60)
-    print("CREATING MART_SALES")
-    print("="*60)
-    
-    create_mart_sales(spark)
-    
-    print("\n✓ mart_sales created successfully!")
+def create_kpi_summary(spark: SparkSession) -> DataFrame:
+    """Pre-computed KPIs for BI dashboard header cards."""
+    fact_sales = read_delta_table(spark, "gold", "fact_sales")
+    fact_ff = read_delta_table(spark, "gold", "fact_order_fulfillment")
 
+    # --- Sales ---
+    sales = fact_sales.agg(
+        spark_round(spark_sum("total_item_value"), 2).alias("total_revenue"),
+        countDistinct("order_id").alias("total_orders"),
+        count("order_item_id").alias("total_items"),
+        countDistinct("customer_id").alias("total_customers"),
+        countDistinct("seller_id").alias("total_sellers"),
+        countDistinct("product_id").alias("total_products"),
+    ).withColumn("avg_order_value", spark_round(col("total_revenue") / col("total_orders"), 2)) \
+     .withColumn("revenue_per_customer", spark_round(col("total_revenue") / col("total_customers"), 2))
 
-def run_kpi_tables(spark: SparkSession) -> None:
-    """Run all KPI table transformations."""
-    print("\n" + "="*60)
-    print("CREATING KPI TABLES")
-    print("="*60)
-    
-    create_mart_kpi_daily(spark)
-    create_mart_top_products(spark)
-    create_mart_customer_analysis(spark)
-    create_mart_seller_performance(spark)
-    
-    print("\n✓ All KPI tables created successfully!")
+    # --- Fulfillment (chỉ đơn đã giao) ---
+    delivered = fact_ff.filter(col("shipping_duration_days").isNotNull())
+    ff_kpis = delivered.agg(
+        spark_round(spark_avg("shipping_duration_days"), 2).alias("avg_delivery_time_days"),
+        spark_round(spark_avg("delivery_delay_days"), 2).alias("avg_delivery_delay_days"),
+        spark_round((spark_sum(col("is_late_delivery")) / count("*")) * 100, 2).alias("late_delivery_rate_pct"),
+    ).withColumn("on_time_delivery_rate_pct", spark_round(lit(100) - col("late_delivery_rate_pct"), 2))
 
+    # --- Reviews ---
+    reviews = fact_ff.filter(col("review_score").isNotNull())
+    rv_kpis = reviews.agg(
+        spark_round(spark_avg("review_score"), 2).alias("avg_review_score"),
+        spark_round((spark_sum(when(col("review_score") >= 4, 1).otherwise(0)) / count("*")) * 100, 2).alias("positive_review_rate_pct"),
+        count("*").alias("total_reviews"),
+    )
 
-def run_all(spark: SparkSession) -> None:
-    """Run complete Platinum layer transformation."""
-    print("\n" + "="*60)
-    print("STARTING PLATINUM LAYER - DATA MART TRANSFORMATION")
-    print("="*60)
-    
-    # Create main mart first
-    run_mart_sales(spark)
-    
-    # Then create KPI tables
-    run_kpi_tables(spark)
-    
-    print("\n" + "="*60)
-    print("PLATINUM LAYER TRANSFORMATION COMPLETED!")
-    print("="*60)
+    # --- Repeat customers ---
+    repeat = (
+        fact_sales.groupBy("customer_id")
+        .agg(countDistinct("order_id").alias("cnt"))
+        .filter(col("cnt") > 1)
+        .agg(count("*").alias("repeat_customer_count"))
+    )
+
+    # Cross join → 1 row with all KPIs
+    result = (
+        sales.crossJoin(ff_kpis).crossJoin(rv_kpis).crossJoin(repeat)
+        .withColumn("repeat_customer_rate_pct",
+                     spark_round((col("repeat_customer_count") / col("total_customers")) * 100, 2))
+    )
+
+    return normalize_schema(result)
 
 
 # =============================================================================
-# MAIN ENTRY POINT
+# MAIN
 # =============================================================================
+
+MARTS = {
+    "sales_summary_mart": create_sales_summary_mart,
+    "customer_mart":      create_customer_mart,
+    "product_mart":       create_product_mart,
+    "kpi_summary":        create_kpi_summary,
+}
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Platinum Layer Transformations (Data Mart / BI Layer)")
-    parser.add_argument(
-        "--table", 
-        type=str, 
-        required=True,
-        choices=[
-            "mart_sales", "mart_kpi_daily", "mart_top_products",
-            "mart_customer_analysis", "mart_seller_performance",
-            "kpi", "all"
-        ],
-        help="Name of the table to transform or 'all' for complete transformation"
-    )
+    parser = argparse.ArgumentParser(description="Platinum Layer — Build BI Data Marts")
+    parser.add_argument("--table", required=True,
+                        choices=list(MARTS.keys()) + ["all"],
+                        help="Mart to build, or 'all'")
     args = parser.parse_args()
 
-    # Initialize Spark
     spark = get_spark_session(app_name=f"PlatinumLayer-{args.table}")
 
     try:
-        # Route to the correct transformation
-        if args.table == "mart_sales":
-            create_mart_sales(spark)
-        elif args.table == "mart_kpi_daily":
-            create_mart_kpi_daily(spark)
-        elif args.table == "mart_top_products":
-            create_mart_top_products(spark)
-        elif args.table == "mart_customer_analysis":
-            create_mart_customer_analysis(spark)
-        elif args.table == "mart_seller_performance":
-            create_mart_seller_performance(spark)
-        elif args.table == "kpi":
-            run_kpi_tables(spark)
-        elif args.table == "all":
-            run_all(spark)
-        else:
-            print(f"Unknown table parameter: {args.table}")
+        targets = MARTS if args.table == "all" else {args.table: MARTS[args.table]}
+
+        for name, func in targets.items():
+            print(f"\n{'='*50}")
+            print(f"  Building: {name}")
+            print(f"{'='*50}")
+
+            df = func(spark)
+            write_delta_table(df, "platinum", name, mode="overwrite")
+
+            print(f"  ✓ {name} — {df.count():,} rows, {len(df.columns)} cols")
     finally:
         spark.stop()
+        print("\nDone. Spark stopped.")

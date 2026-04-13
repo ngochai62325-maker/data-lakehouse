@@ -1,295 +1,426 @@
 -- =============================================================================
--- Amazon Athena Queries for Olist Lakehouse
+-- Amazon Athena Queries for Olist Lakehouse — Platinum Layer
 -- =============================================================================
 -- Database: olist_lakehouse
--- Tables: mart_sales, mart_kpi_daily, mart_top_products, 
---         mart_customer_analysis, mart_seller_performance
+-- Tables (4 marts — khớp với gold_to_platinum.py & glue_catalog.py):
+--   1. sales_summary_mart   — Daily sales KPIs (time-series)
+--   2. customer_mart        — Customer-level behavior metrics
+--   3. product_mart         — Product-level performance
+--   4. kpi_summary          — Global headline KPIs (single row)
 -- =============================================================================
 
--- -----------------------------------------------------------------------------
--- 1. TEST QUERIES - Verify data loaded correctly
--- -----------------------------------------------------------------------------
 
--- Test mart_sales
-SELECT COUNT(*) as total_records FROM olist_lakehouse.mart_sales;
+-- =============================================================================
+-- 1. TEST QUERIES — Verify data loaded correctly
+-- =============================================================================
 
--- Test mart_kpi_daily
-SELECT COUNT(*) as total_records FROM olist_lakehouse.mart_kpi_daily;
+-- Row counts — All 4 marts
+SELECT 'sales_summary_mart' AS table_name, COUNT(*) AS row_count FROM olist_lakehouse.sales_summary_mart
+UNION ALL
+SELECT 'customer_mart', COUNT(*) FROM olist_lakehouse.customer_mart
+UNION ALL
+SELECT 'product_mart', COUNT(*) FROM olist_lakehouse.product_mart
+UNION ALL
+SELECT 'kpi_summary', COUNT(*) FROM olist_lakehouse.kpi_summary;
 
--- Preview mart_sales
-SELECT * FROM olist_lakehouse.mart_sales LIMIT 10;
+-- Preview each mart
+SELECT * FROM olist_lakehouse.sales_summary_mart LIMIT 10;
+SELECT * FROM olist_lakehouse.customer_mart LIMIT 10;
+SELECT * FROM olist_lakehouse.product_mart LIMIT 10;
+SELECT * FROM olist_lakehouse.kpi_summary;
 
--- Preview mart_kpi_daily
-SELECT * FROM olist_lakehouse.mart_kpi_daily LIMIT 10;
 
+-- =============================================================================
+-- 2. KPI SUMMARY — Global Dashboard Cards (single row)
+-- =============================================================================
 
--- -----------------------------------------------------------------------------
--- 2. SALES OVERVIEW QUERIES
--- -----------------------------------------------------------------------------
-
--- Total Revenue & Orders Summary
+-- All headline KPIs
 SELECT 
-    COUNT(DISTINCT order_id) as total_orders,
-    SUM(payment_value) as total_revenue,
-    AVG(payment_value) as avg_order_value
-FROM olist_lakehouse.mart_sales;
+    total_revenue,
+    total_orders,
+    total_items,
+    total_customers,
+    total_sellers,
+    total_products,
+    avg_order_value,
+    revenue_per_customer,
+    avg_delivery_time_days,
+    avg_delivery_delay_days,
+    on_time_delivery_rate_pct,
+    late_delivery_rate_pct,
+    avg_review_score,
+    positive_review_rate_pct,
+    total_reviews,
+    repeat_customer_count,
+    repeat_customer_rate_pct
+FROM olist_lakehouse.kpi_summary;
 
--- Revenue by Month
+
+-- =============================================================================
+-- 3. SALES SUMMARY — Time Series Analysis
+-- =============================================================================
+
+-- Daily Sales Trend (last 30 days)
+SELECT 
+    purchase_date_key,
+    full_date,
+    day_name,
+    is_weekend,
+    total_revenue,
+    total_payment,
+    total_orders,
+    total_items,
+    avg_order_value,
+    avg_item_price,
+    total_freight,
+    revenue_day_growth_pct
+FROM olist_lakehouse.sales_summary_mart
+ORDER BY purchase_date_key DESC
+LIMIT 30;
+
+-- Monthly Revenue Trend
 SELECT 
     year,
     month,
-    COUNT(DISTINCT order_id) as total_orders,
-    SUM(payment_value) as total_revenue,
-    SUM(price) as total_price,
-    SUM(freight_value) as total_freight
-FROM olist_lakehouse.mart_sales
+    SUM(total_revenue) AS monthly_revenue,
+    SUM(total_payment) AS monthly_payment,
+    SUM(total_orders) AS monthly_orders,
+    SUM(total_items) AS monthly_items,
+    SUM(total_freight) AS monthly_freight,
+    ROUND(SUM(total_revenue) / SUM(total_orders), 2) AS avg_order_value
+FROM olist_lakehouse.sales_summary_mart
 GROUP BY year, month
 ORDER BY year, month;
 
--- Revenue by Year
+-- Quarterly Revenue
 SELECT 
     year,
-    COUNT(DISTINCT order_id) as total_orders,
-    SUM(payment_value) as total_revenue
-FROM olist_lakehouse.mart_sales
-GROUP BY year
-ORDER BY year;
+    quarter,
+    SUM(total_revenue) AS quarterly_revenue,
+    SUM(total_orders) AS quarterly_orders,
+    SUM(total_items) AS quarterly_items
+FROM olist_lakehouse.sales_summary_mart
+GROUP BY year, quarter
+ORDER BY year, quarter;
 
--- Daily KPI from mart_kpi_daily
+-- Weekend vs Weekday Performance
 SELECT 
-    date_key,
-    year,
-    month,
-    total_orders,
+    CASE WHEN is_weekend THEN 'Weekend' ELSE 'Weekday' END AS day_type,
+    COUNT(*) AS num_days,
+    SUM(total_revenue) AS total_revenue,
+    ROUND(AVG(total_revenue), 2) AS avg_daily_revenue,
+    SUM(total_orders) AS total_orders,
+    ROUND(AVG(total_orders), 2) AS avg_daily_orders,
+    ROUND(AVG(avg_item_price), 2) AS avg_item_price
+FROM olist_lakehouse.sales_summary_mart
+GROUP BY is_weekend;
+
+-- Revenue by Day of Week
+SELECT 
+    day_name,
+    day_of_week,
+    SUM(total_revenue) AS total_revenue,
+    ROUND(AVG(total_revenue), 2) AS avg_daily_revenue,
+    SUM(total_orders) AS total_orders
+FROM olist_lakehouse.sales_summary_mart
+GROUP BY day_name, day_of_week
+ORDER BY day_of_week;
+
+-- Top 10 Revenue Days
+SELECT 
+    purchase_date_key,
+    full_date,
+    day_name,
     total_revenue,
-    total_items,
-    avg_order_value
-FROM olist_lakehouse.mart_kpi_daily
-ORDER BY date_key DESC
-LIMIT 30;
-
-
--- -----------------------------------------------------------------------------
--- 3. PRODUCT ANALYSIS QUERIES
--- -----------------------------------------------------------------------------
-
--- Top 10 Products by Revenue
-SELECT 
-    product_id,
-    product_category_name_english,
-    total_sales,
-    total_items
-FROM olist_lakehouse.mart_top_products
-ORDER BY total_sales DESC
-LIMIT 10;
-
--- Sales by Category
-SELECT 
-    product_category_name_english as category,
-    SUM(total_sales) as total_sales,
-    SUM(total_items) as total_items,
-    COUNT(*) as product_count
-FROM olist_lakehouse.mart_top_products
-GROUP BY product_category_name_english
-ORDER BY total_sales DESC
-LIMIT 20;
-
--- Product Performance from mart_sales
-SELECT 
-    product_category_name_english as category,
-    COUNT(DISTINCT order_id) as total_orders,
-    SUM(payment_value) as total_revenue,
-    AVG(price) as avg_price
-FROM olist_lakehouse.mart_sales
-GROUP BY product_category_name_english
-ORDER BY total_revenue DESC;
-
-
--- -----------------------------------------------------------------------------
--- 4. CUSTOMER ANALYSIS QUERIES
--- -----------------------------------------------------------------------------
-
--- Top 10 Customers by Spending
-SELECT 
-    customer_id,
-    customer_state,
     total_orders,
-    total_spent,
     avg_order_value
-FROM olist_lakehouse.mart_customer_analysis
-ORDER BY total_spent DESC
-LIMIT 10;
-
--- Revenue by Customer State
-SELECT 
-    customer_state,
-    COUNT(*) as customer_count,
-    SUM(total_spent) as total_revenue,
-    AVG(total_spent) as avg_customer_spending
-FROM olist_lakehouse.mart_customer_analysis
-GROUP BY customer_state
-ORDER BY total_revenue DESC;
-
--- Customer Distribution by State from mart_sales
-SELECT 
-    customer_state,
-    COUNT(DISTINCT customer_id) as customer_count,
-    COUNT(DISTINCT order_id) as order_count,
-    SUM(payment_value) as total_revenue
-FROM olist_lakehouse.mart_sales
-GROUP BY customer_state
-ORDER BY total_revenue DESC;
-
--- Customer Segmentation by Order Count
-SELECT 
-    CASE 
-        WHEN total_orders = 1 THEN '1 order'
-        WHEN total_orders BETWEEN 2 AND 3 THEN '2-3 orders'
-        WHEN total_orders BETWEEN 4 AND 5 THEN '4-5 orders'
-        ELSE '6+ orders'
-    END as order_segment,
-    COUNT(*) as customer_count,
-    SUM(total_spent) as total_revenue
-FROM olist_lakehouse.mart_customer_analysis
-GROUP BY 
-    CASE 
-        WHEN total_orders = 1 THEN '1 order'
-        WHEN total_orders BETWEEN 2 AND 3 THEN '2-3 orders'
-        WHEN total_orders BETWEEN 4 AND 5 THEN '4-5 orders'
-        ELSE '6+ orders'
-    END
-ORDER BY customer_count DESC;
-
-
--- -----------------------------------------------------------------------------
--- 5. SELLER PERFORMANCE QUERIES
--- -----------------------------------------------------------------------------
-
--- Top 10 Sellers by Revenue
-SELECT 
-    seller_id,
-    seller_state,
-    total_orders,
-    total_revenue,
-    avg_review_score
-FROM olist_lakehouse.mart_seller_performance
+FROM olist_lakehouse.sales_summary_mart
 ORDER BY total_revenue DESC
 LIMIT 10;
 
--- Sellers by State
+-- Sales Growth Trend (days with highest growth)
 SELECT 
-    seller_state,
-    COUNT(*) as seller_count,
-    SUM(total_orders) as total_orders,
-    SUM(total_revenue) as total_revenue,
-    AVG(avg_review_score) as avg_review_score
-FROM olist_lakehouse.mart_seller_performance
-GROUP BY seller_state
+    purchase_date_key,
+    full_date,
+    total_revenue,
+    revenue_day_growth_pct
+FROM olist_lakehouse.sales_summary_mart
+WHERE revenue_day_growth_pct IS NOT NULL
+ORDER BY revenue_day_growth_pct DESC
+LIMIT 10;
+
+
+-- =============================================================================
+-- 4. CUSTOMER ANALYSIS
+-- =============================================================================
+
+-- Top 20 Customers by Spending
+SELECT 
+    customer_id,
+    customer_unique_id,
+    customer_city,
+    customer_state,
+    total_orders,
+    total_spent,
+    avg_order_value,
+    total_items_purchased,
+    total_freight_paid,
+    avg_item_price,
+    last_purchase_date,
+    is_repeat_customer
+FROM olist_lakehouse.customer_mart
+ORDER BY total_spent DESC
+LIMIT 20;
+
+-- Customer Distribution by State
+SELECT 
+    customer_state,
+    COUNT(*) AS customer_count,
+    SUM(total_spent) AS total_revenue,
+    ROUND(AVG(total_spent), 2) AS avg_customer_value,
+    SUM(total_orders) AS total_orders,
+    SUM(CASE WHEN is_repeat_customer = 1 THEN 1 ELSE 0 END) AS repeat_customers,
+    ROUND(SUM(CASE WHEN is_repeat_customer = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS repeat_rate_pct
+FROM olist_lakehouse.customer_mart
+GROUP BY customer_state
 ORDER BY total_revenue DESC;
 
--- Seller Performance Tiers
+-- Repeat vs One-time Customers
+SELECT 
+    CASE WHEN is_repeat_customer = 1 THEN 'Repeat' ELSE 'One-time' END AS customer_type,
+    COUNT(*) AS customer_count,
+    SUM(total_spent) AS total_revenue,
+    ROUND(AVG(total_spent), 2) AS avg_spending,
+    ROUND(AVG(total_orders), 2) AS avg_orders,
+    ROUND(AVG(avg_item_price), 2) AS avg_item_price
+FROM olist_lakehouse.customer_mart
+GROUP BY is_repeat_customer;
+
+-- Customer Segmentation by Spending Tiers
 SELECT 
     CASE 
-        WHEN avg_review_score >= 4.5 THEN 'Excellent (4.5+)'
-        WHEN avg_review_score >= 4.0 THEN 'Good (4.0-4.5)'
-        WHEN avg_review_score >= 3.0 THEN 'Average (3.0-4.0)'
-        ELSE 'Below Average (<3.0)'
-    END as performance_tier,
-    COUNT(*) as seller_count,
-    SUM(total_revenue) as total_revenue,
-    AVG(avg_review_score) as avg_score
-FROM olist_lakehouse.mart_seller_performance
-WHERE avg_review_score IS NOT NULL
+        WHEN total_spent >= 1000 THEN 'High (1000+)'
+        WHEN total_spent >= 500 THEN 'Medium (500-999)'
+        WHEN total_spent >= 100 THEN 'Low (100-499)'
+        ELSE 'Minimal (<100)'
+    END AS spending_tier,
+    COUNT(*) AS customer_count,
+    SUM(total_spent) AS total_revenue,
+    ROUND(AVG(total_orders), 2) AS avg_orders,
+    ROUND(AVG(total_items_purchased), 2) AS avg_items
+FROM olist_lakehouse.customer_mart
 GROUP BY 
     CASE 
-        WHEN avg_review_score >= 4.5 THEN 'Excellent (4.5+)'
-        WHEN avg_review_score >= 4.0 THEN 'Good (4.0-4.5)'
-        WHEN avg_review_score >= 3.0 THEN 'Average (3.0-4.0)'
-        ELSE 'Below Average (<3.0)'
+        WHEN total_spent >= 1000 THEN 'High (1000+)'
+        WHEN total_spent >= 500 THEN 'Medium (500-999)'
+        WHEN total_spent >= 100 THEN 'Low (100-499)'
+        ELSE 'Minimal (<100)'
     END
-ORDER BY avg_score DESC;
+ORDER BY total_revenue DESC;
+
+-- Top 10 Cities by Customer Revenue
+SELECT 
+    customer_city,
+    customer_state,
+    COUNT(*) AS customer_count,
+    SUM(total_spent) AS total_revenue,
+    ROUND(AVG(total_spent), 2) AS avg_customer_value
+FROM olist_lakehouse.customer_mart
+GROUP BY customer_city, customer_state
+ORDER BY total_revenue DESC
+LIMIT 10;
 
 
--- -----------------------------------------------------------------------------
--- 6. VIEWS FOR POWER BI (Create once, query easily)
--- -----------------------------------------------------------------------------
+-- =============================================================================
+-- 5. PRODUCT ANALYSIS
+-- =============================================================================
+
+-- Top 20 Products by Revenue
+SELECT 
+    product_id,
+    category,
+    total_sales,
+    total_quantity,
+    total_orders,
+    avg_price,
+    avg_freight,
+    total_freight
+FROM olist_lakehouse.product_mart
+ORDER BY total_sales DESC
+LIMIT 20;
+
+-- Sales by Category
+SELECT 
+    category,
+    COUNT(*) AS product_count,
+    SUM(total_sales) AS total_revenue,
+    SUM(total_quantity) AS total_items,
+    SUM(total_orders) AS total_orders,
+    ROUND(AVG(avg_price), 2) AS avg_price,
+    ROUND(AVG(avg_freight), 2) AS avg_freight,
+    SUM(total_freight) AS total_freight
+FROM olist_lakehouse.product_mart
+GROUP BY category
+ORDER BY total_revenue DESC;
+
+-- Top 10 Categories by Revenue
+SELECT 
+    category,
+    SUM(total_sales) AS total_revenue,
+    SUM(total_quantity) AS total_items,
+    COUNT(*) AS product_count
+FROM olist_lakehouse.product_mart
+GROUP BY category
+ORDER BY total_revenue DESC
+LIMIT 10;
+
+-- Product Size vs Freight Analysis
+SELECT 
+    CASE 
+        WHEN product_weight_g >= 10000 THEN 'Heavy (10kg+)'
+        WHEN product_weight_g >= 5000 THEN 'Medium (5-10kg)'
+        WHEN product_weight_g >= 1000 THEN 'Light (1-5kg)'
+        ELSE 'Very Light (<1kg)'
+    END AS weight_tier,
+    COUNT(*) AS product_count,
+    ROUND(AVG(avg_freight), 2) AS avg_freight,
+    ROUND(AVG(avg_price), 2) AS avg_price,
+    SUM(total_sales) AS total_revenue,
+    SUM(total_freight) AS total_freight
+FROM olist_lakehouse.product_mart
+WHERE product_weight_g IS NOT NULL
+GROUP BY 
+    CASE 
+        WHEN product_weight_g >= 10000 THEN 'Heavy (10kg+)'
+        WHEN product_weight_g >= 5000 THEN 'Medium (5-10kg)'
+        WHEN product_weight_g >= 1000 THEN 'Light (1-5kg)'
+        ELSE 'Very Light (<1kg)'
+    END
+ORDER BY avg_freight DESC;
+
+-- Product Dimensions: Price per Volume Unit
+SELECT 
+    product_id,
+    category,
+    total_sales,
+    avg_price,
+    product_weight_g,
+    ROUND(product_length_cm * product_height_cm * product_width_cm, 2) AS volume_cm3,
+    avg_freight
+FROM olist_lakehouse.product_mart
+WHERE product_length_cm IS NOT NULL
+  AND product_height_cm IS NOT NULL
+  AND product_width_cm IS NOT NULL
+ORDER BY total_sales DESC
+LIMIT 20;
+
+
+-- =============================================================================
+-- 6. CROSS-MART ANALYSIS — Kết hợp nhiều mart
+-- =============================================================================
+
+-- Customer State + Sales Summary: Revenue & Customer Count by State
+SELECT 
+    c.customer_state,
+    COUNT(*) AS customer_count,
+    SUM(c.total_spent) AS total_customer_revenue,
+    ROUND(AVG(c.total_spent), 2) AS avg_customer_value,
+    SUM(c.total_orders) AS total_orders
+FROM olist_lakehouse.customer_mart c
+GROUP BY c.customer_state
+ORDER BY total_customer_revenue DESC
+LIMIT 10;
+
+-- Product Category Performance (Top categories with details)
+SELECT 
+    p.category,
+    COUNT(*) AS product_count,
+    SUM(p.total_sales) AS category_revenue,
+    SUM(p.total_quantity) AS total_items_sold,
+    ROUND(AVG(p.avg_price), 2) AS avg_product_price,
+    ROUND(AVG(p.product_weight_g), 2) AS avg_weight_g,
+    ROUND(SUM(p.total_freight), 2) AS total_freight_cost
+FROM olist_lakehouse.product_mart p
+GROUP BY p.category
+ORDER BY category_revenue DESC
+LIMIT 15;
+
+
+-- =============================================================================
+-- 7. VIEWS FOR POWER BI (Create once, query easily)
+-- =============================================================================
 
 -- View: Monthly Sales Summary
 CREATE OR REPLACE VIEW olist_lakehouse.vw_monthly_sales AS
 SELECT 
     year,
     month,
-    COUNT(DISTINCT order_id) as total_orders,
-    SUM(payment_value) as total_revenue,
-    SUM(price) as total_price,
-    SUM(freight_value) as total_freight,
-    AVG(payment_value) as avg_order_value
-FROM olist_lakehouse.mart_sales
+    SUM(total_revenue) AS monthly_revenue,
+    SUM(total_payment) AS monthly_payment,
+    SUM(total_orders) AS monthly_orders,
+    SUM(total_items) AS monthly_items,
+    SUM(total_freight) AS monthly_freight,
+    ROUND(SUM(total_revenue) / SUM(total_orders), 2) AS avg_order_value
+FROM olist_lakehouse.sales_summary_mart
 GROUP BY year, month;
 
 -- View: Category Performance
 CREATE OR REPLACE VIEW olist_lakehouse.vw_category_performance AS
 SELECT 
-    product_category_name_english as category,
-    SUM(total_sales) as total_sales,
-    SUM(total_items) as total_items,
-    COUNT(*) as product_count,
-    AVG(total_sales) as avg_product_sales
-FROM olist_lakehouse.mart_top_products
-GROUP BY product_category_name_english;
+    category,
+    COUNT(*) AS product_count,
+    SUM(total_sales) AS total_revenue,
+    SUM(total_quantity) AS total_items,
+    SUM(total_orders) AS total_orders,
+    ROUND(AVG(avg_price), 2) AS avg_price,
+    ROUND(AVG(avg_freight), 2) AS avg_freight,
+    SUM(total_freight) AS total_freight
+FROM olist_lakehouse.product_mart
+GROUP BY category;
 
--- View: State Summary
-CREATE OR REPLACE VIEW olist_lakehouse.vw_state_summary AS
+-- View: Customer State Summary
+CREATE OR REPLACE VIEW olist_lakehouse.vw_customer_state_summary AS
 SELECT 
-    customer_state as state,
-    COUNT(DISTINCT customer_id) as customer_count,
-    SUM(total_spent) as total_revenue,
-    AVG(total_spent) as avg_customer_value,
-    SUM(total_orders) as total_orders
-FROM olist_lakehouse.mart_customer_analysis
+    customer_state,
+    COUNT(*) AS customer_count,
+    SUM(total_spent) AS total_revenue,
+    SUM(total_orders) AS total_orders,
+    ROUND(AVG(total_spent), 2) AS avg_customer_value,
+    SUM(CASE WHEN is_repeat_customer = 1 THEN 1 ELSE 0 END) AS repeat_customers,
+    ROUND(SUM(CASE WHEN is_repeat_customer = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS repeat_rate_pct
+FROM olist_lakehouse.customer_mart
 GROUP BY customer_state;
 
--- View: Seller Summary
-CREATE OR REPLACE VIEW olist_lakehouse.vw_seller_summary AS
+-- View: Customer Spending Tiers
+CREATE OR REPLACE VIEW olist_lakehouse.vw_customer_tiers AS
 SELECT 
-    seller_state,
-    COUNT(*) as seller_count,
-    SUM(total_orders) as total_orders,
-    SUM(total_revenue) as total_revenue,
-    AVG(avg_review_score) as avg_review_score
-FROM olist_lakehouse.mart_seller_performance
-GROUP BY seller_state;
+    CASE 
+        WHEN total_spent >= 1000 THEN 'High (1000+)'
+        WHEN total_spent >= 500 THEN 'Medium (500-999)'
+        WHEN total_spent >= 100 THEN 'Low (100-499)'
+        ELSE 'Minimal (<100)'
+    END AS spending_tier,
+    COUNT(*) AS customer_count,
+    SUM(total_spent) AS total_revenue,
+    ROUND(AVG(total_orders), 2) AS avg_orders,
+    ROUND(AVG(total_items_purchased), 2) AS avg_items
+FROM olist_lakehouse.customer_mart
+GROUP BY 
+    CASE 
+        WHEN total_spent >= 1000 THEN 'High (1000+)'
+        WHEN total_spent >= 500 THEN 'Medium (500-999)'
+        WHEN total_spent >= 100 THEN 'Low (100-499)'
+        ELSE 'Minimal (<100)'
+    END;
 
-
--- -----------------------------------------------------------------------------
--- 7. KPI DASHBOARD QUERIES
--- -----------------------------------------------------------------------------
-
--- Overall KPIs
+-- View: Weekend vs Weekday Sales
+CREATE OR REPLACE VIEW olist_lakehouse.vw_weekday_weekend AS
 SELECT 
-    SUM(total_orders) as total_orders,
-    SUM(total_revenue) as total_revenue,
-    SUM(total_items) as total_items,
-    AVG(avg_order_value) as avg_order_value
-FROM olist_lakehouse.mart_kpi_daily;
-
--- Monthly Trend
-SELECT 
-    year,
-    month,
-    SUM(total_orders) as total_orders,
-    SUM(total_revenue) as total_revenue,
-    AVG(avg_order_value) as avg_order_value
-FROM olist_lakehouse.mart_kpi_daily
-GROUP BY year, month
-ORDER BY year, month;
-
--- Year-over-Year Comparison
-SELECT 
-    year,
-    SUM(total_orders) as total_orders,
-    SUM(total_revenue) as total_revenue,
-    SUM(total_items) as total_items
-FROM olist_lakehouse.mart_kpi_daily
-GROUP BY year
-ORDER BY year;
+    CASE WHEN is_weekend THEN 'Weekend' ELSE 'Weekday' END AS day_type,
+    COUNT(*) AS num_days,
+    SUM(total_revenue) AS total_revenue,
+    ROUND(AVG(total_revenue), 2) AS avg_daily_revenue,
+    SUM(total_orders) AS total_orders,
+    ROUND(AVG(total_orders), 2) AS avg_daily_orders
+FROM olist_lakehouse.sales_summary_mart
+GROUP BY is_weekend;
