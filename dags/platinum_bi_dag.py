@@ -1,10 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.empty import EmptyOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
-from airflow.sensors.external_task import ExternalTaskSensor
 
 from dag_config import (
     get_default_args,
@@ -12,18 +10,14 @@ from dag_config import (
     DAG_IDS,
     DAG_SCHEDULES,
     DAG_TAGS,
-    ETL_BASE_PATH,
+    ETL_SCRIPTS,
 )
 
 
 # ─── Cấu hình mặc định ──────────────────────────────────────────────────────
 default_args = get_default_args(owner="thanhvien4", retries=2)
 
-# ─── Đường dẫn script Platinum (trong container Airflow) ─────────────────────
-PLATINUM_SCRIPT = f"{ETL_BASE_PATH}/processing/gold_to_platinum.py"
-
 # ─── Danh sách các mart cần build ────────────────────────────────────────────
-# Khớp với MARTS dict trong gold_to_platinum.py (4 marts)
 PLATINUM_MARTS = [
     "sales_summary_mart",
     "customer_mart",
@@ -59,9 +53,7 @@ def _log_platinum_end(**context):
     print("=" * 70)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 #  ĐỊNH NGHĨA DAG — PLATINUM BI LAYER
-# ═══════════════════════════════════════════════════════════════════════════════
 with DAG(
     dag_id=DAG_IDS["platinum"],
     default_args=default_args,
@@ -78,22 +70,8 @@ with DAG(
         python_callable=_log_platinum_start,
     )
 
-    # # ── Chờ Gold DAG hoàn tất ─────────────────────────────────────────────────
-    # # ExternalTaskSensor đảm bảo Platinum chỉ chạy khi Gold đã xong
-    # # execution_delta = 1h vì Platinum chạy 15:00 UTC, Gold chạy 14:00 UTC
-    # wait_for_gold = ExternalTaskSensor(
-    #     task_id="wait_for_gold_completion",
-    #     external_dag_id=DAG_IDS["gold"],
-    #     external_task_id=None,              # None = chờ toàn bộ DAG hoàn tất
-    #     execution_delta=timedelta(hours=1), # Platinum schedule - Gold schedule
-    #     mode="poke",
-    #     poke_interval=60,                   # Kiểm tra mỗi 60 giây
-    #     timeout=7200,                       # Timeout sau 2 tiếng
-    #     soft_fail=False,                    # Fail DAG nếu Gold không xong
-    # )
-
     # ── Tạo các task cho từng mart ────────────────────────────────────────────
-    # Mỗi mart là một SparkSubmitOperator task riêng biệt
+    # Mỗi mart là một SparkSubmitOperator task riêng biệt.
     mart_tasks = {}
 
     for mart_name in PLATINUM_MARTS:
@@ -102,7 +80,7 @@ with DAG(
         mart_tasks[mart_name] = SparkSubmitOperator(
             task_id=task_id,
             **create_spark_submit_kwargs(
-                application=PLATINUM_SCRIPT,
+                application=ETL_SCRIPTS["gold_to_platinum"],
                 app_name=f"platinum_{mart_name}",
                 application_args=["--table", mart_name],
             ),
@@ -114,18 +92,13 @@ with DAG(
         python_callable=_log_platinum_end,
     )
 
-    # ══════════════════════════════════════════════════════════════════════════
     # TASK DEPENDENCIES
-    # ══════════════════════════════════════════════════════════════════════════
-    #
     #  Phase 1 (Parallel — independent base marts):
     #    Sales Summary, Customer, Product
-    #
+
     #  Phase 2 (Depends on all base marts):
     #    KPI Summary (uses fact_sales + fact_order_fulfillment,
     #    runs after base marts to ensure consistency)
-    #
-    # ══════════════════════════════════════════════════════════════════════════
 
     # Phase 1: Base marts can run in parallel
     phase1_tasks = [
@@ -140,7 +113,7 @@ with DAG(
     ]
 
     # Wire dependencies
-    # start → wait_for_gold → phase1 (parallel) → phase2 → end
+    # start → phase1 (parallel) → phase2 → end
     start >> phase1_tasks
 
     for t in phase1_tasks:
