@@ -20,6 +20,9 @@ from etl_pipeline.utils.s3_writer import write_delta_table
 def transform_dim_products(spark):
     print("Transforming dim_products...")
     df_silver_products = read_delta_table(spark, "silver", "silver_olist_products_dataset")
+    # Drop existing translation column in products table to avoid ambiguous join
+    df_silver_products = df_silver_products.drop("product_category_name_english")
+    
     df_silver_translation = read_delta_table(spark, "silver", "silver_product_category_name_translation")
     
     df_dim_products = df_silver_products.join(df_silver_translation, on="product_category_name", how="left")

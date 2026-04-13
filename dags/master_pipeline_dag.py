@@ -67,6 +67,7 @@ with DAG(
         allowed_states=["success"],          # Chỉ tiếp tục nếu thành công
         failed_states=["failed"],            # Dừng nếu DAG con thất bại
         reset_dag_run=True,                  # Reset nếu DAG run đã tồn tại
+        retries=0,                           # Fail-fast: không retry lại trigger ở Master
     )
 
     # ── Trigger Silver Transformation ─────────────────────────────────────────
@@ -78,6 +79,7 @@ with DAG(
         allowed_states=["success"],
         failed_states=["failed"],
         reset_dag_run=True,
+        retries=0,
     )
 
     # ── Trigger Gold Aggregation ──────────────────────────────────────────────
@@ -89,6 +91,7 @@ with DAG(
         allowed_states=["success"],
         failed_states=["failed"],
         reset_dag_run=True,
+        retries=0,
     )
 
     # ── Trigger Platinum BI ───────────────────────────────────────────────────
@@ -100,6 +103,7 @@ with DAG(
         allowed_states=["success"],
         failed_states=["failed"],
         reset_dag_run=True,
+        retries=0,
     )
 
     # ── End ───────────────────────────────────────────────────────────────────
