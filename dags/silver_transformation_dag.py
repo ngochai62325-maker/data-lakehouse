@@ -36,7 +36,7 @@ with DAG(
         external_dag_id=DAG_IDS["bronze"],
         external_task_id=None,          # Chờ toàn bộ tiến trình của DAG cấp Bronze hoàn thành thay vì một công việc cụ thể
         allowed_states=["success"],
-        failed_states=["failed", "skipped"],
+        failed_states=["failed"],
         mode="poke",
         poke_interval=60,
         timeout=3600,
