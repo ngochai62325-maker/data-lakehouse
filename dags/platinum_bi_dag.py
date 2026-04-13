@@ -14,10 +14,10 @@ from dag_config import (
 )
 
 
-# ─── Cấu hình mặc định ──────────────────────────────────────────────────────
+# Cấu hình mặc định
 default_args = get_default_args(owner="thanhvien4", retries=2)
 
-# ─── Danh sách các mart cần build ────────────────────────────────────────────
+# Danh sách các mart cần build
 PLATINUM_MARTS = [
     "sales_summary_mart",
     "customer_mart",
@@ -26,7 +26,7 @@ PLATINUM_MARTS = [
 ]
 
 
-# ─── Hàm log ─────────────────────────────────────────────────────────────────
+# Hàm log
 def _log_platinum_start(**context):
     """Ghi log khi Platinum pipeline bắt đầu."""
     print("=" * 70)
@@ -53,7 +53,7 @@ def _log_platinum_end(**context):
     print("=" * 70)
 
 
-#  ĐỊNH NGHĨA DAG — PLATINUM BI LAYER
+# ĐỊNH NGHĨA DAG — PLATINUM BI LAYER
 with DAG(
     dag_id=DAG_IDS["platinum"],
     default_args=default_args,
@@ -64,13 +64,13 @@ with DAG(
     tags=DAG_TAGS["platinum"],
 ) as dag:
 
-    # ── Start ─────────────────────────────────────────────────────────────────
+    # Start
     start = PythonOperator(
         task_id="platinum_start",
         python_callable=_log_platinum_start,
     )
 
-    # ── Tạo các task cho từng mart ────────────────────────────────────────────
+    # Tạo các task cho từng mart
     # Mỗi mart là một SparkSubmitOperator task riêng biệt.
     mart_tasks = {}
 
@@ -86,7 +86,7 @@ with DAG(
             ),
         )
 
-    # ── End ───────────────────────────────────────────────────────────────────
+    # End
     end = PythonOperator(
         task_id="platinum_end",
         python_callable=_log_platinum_end,
