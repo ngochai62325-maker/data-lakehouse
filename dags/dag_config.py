@@ -69,8 +69,8 @@ ETL_SCRIPTS = {
     # "validate_silver":     f"{ETL_BASE_PATH}/transformation/validate_silver.py",
 
     # ── Gold Layer (TV3) ── Thêm đường dẫn khi có script
-    # "aggregate_gold":      f"{ETL_BASE_PATH}/aggregation/aggregate_gold.py",
-    # "validate_gold":       f"{ETL_BASE_PATH}/aggregation/validate_gold.py",
+    "aggregate_gold":      f"{ETL_BASE_PATH}/processing/silver_to_gold.py",
+    #"validate_gold":       f"{ETL_BASE_PATH}/aggregation/validate_gold.py",
 
     # ── Platinum Layer (TV4) ──
     "gold_to_platinum":     f"{ETL_BASE_PATH}/processing/gold_to_platinum.py",
