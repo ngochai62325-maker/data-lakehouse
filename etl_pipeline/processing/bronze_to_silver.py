@@ -2,29 +2,39 @@ import sys
 import os
 import argparse
 
-# --- PATH FIX ---
-# Get the absolute path of the root directory (/opt/spark)
-# Since this file is in /opt/spark/etl_pipeline/processing/, we go up two levels
+# vị trí thư mục gốc và tích hợp vào biến môi trường hệ thống.
+# nạp các mô-đun thiết lập tùy chỉnh (như etl_pipeline) một cách an toàn.
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
 
-# Add it to sys.path so Python can find the 'etl_pipeline' module
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
-# ----------------
 
-# NOW we can safely do our custom imports
+# Nạp các hàm hỗ trợ cơ bản từ thư viện PySpark
 from pyspark.sql.functions import col, to_date, to_timestamp, regexp_replace, lpad, lower, trim
 
+# Nạp các hàm tiện ích nội bộ để trích xuất và cấp phát dữ liệu S3
 from etl_pipeline.utils.spark_session import get_spark_session
 from etl_pipeline.utils.s3_reader import read_delta_table
 from etl_pipeline.utils.s3_writer import write_delta_table
 
+
 def transform_orders(spark):
+    """
+    Chuẩn hóa định dạng bảng dữ liệu Orders.
+
+    Args:
+        spark (SparkSession): Hệ thống phiên làm việc Spark hiện hành.
+    
+    Action:
+        Tiếp nhận dữ liệu, thực hiện ép kiểu thời gian cho các tiêu chí giao hàng. Các bản ghi chưa hoàn thành sẽ duy trì trạng thái Null.
+        Ghi đè kết quả cấu trúc xuống tầng Silver.
+    """
     print("Transforming Orders...")
     df = read_delta_table(spark, "bronze", "olist_orders_dataset")
     
-    # Ép kiểu 5 cột sang Timestamp (không drop Null -> các đơn đang giao sẽ vẫn giữ Null)
+    # Chuyển đổi các trường mốc sự kiện sang định dạng Timestamp chuẩn để phục vụ phân tích chuỗi thời gian.
+    # Cấu trúc này không sử dụng thao tác loại bỏ giá trị Null nhằm bảo tồn dữ liệu của các đơn hàng chưa khép kín quy trình (chưa giao hàng, bị hủy).
     timestamp_cols = [
         "order_purchase_timestamp", "order_approved_at", 
         "order_delivered_carrier_date", "order_delivered_customer_date", 
@@ -36,35 +46,57 @@ def transform_orders(spark):
         
     write_delta_table(df_cleaned, "silver", "silver_olist_orders_dataset", mode="overwrite")
 
+
 def transform_order_items(spark):
+    """
+    Chuẩn hóa cấu trúc bảng dữ liệu Order Items.
+
+    Args:
+        spark (SparkSession): Hệ thống phiên làm việc Spark hiện hành.
+    
+    Action:
+        Ép kiểu logic số học và thời gian, sau đó ghi đè xuống tầng Silver.
+    """
     print("Transforming Order Items...")
     df = read_delta_table(spark, "bronze", "olist_order_items_dataset")
     
-    # Ép kiểu Timestamp và Float/Double
+    # Thiết lập kiểu số thực (Double) cho các trường tài chính để duy trì độ vẹn toàn khi vận hành phép toán tổng hợp tại tầng Gold.
+    # Chuẩn hóa trường shipping_limit_date sang định dạng Timestamp.
     df_cleaned = df.withColumn("shipping_limit_date", to_timestamp(col("shipping_limit_date"))) \
                    .withColumn("price", col("price").cast("double")) \
                    .withColumn("freight_value", col("freight_value").cast("double"))
                    
     write_delta_table(df_cleaned, "silver", "silver_olist_order_items_dataset", mode="overwrite")
 
+
 def transform_customers(spark):
+    """
+    Chuẩn hóa bộ dữ liệu Customers.
+    Dữ liệu được làm sạch các trường địa lý, sau đó ghi đè kết cấu chuẩn xuống tầng Silver.
+    """
     print("Transforming Customers...")
     df = read_delta_table(spark, "bronze", "olist_customers_dataset")
     
-    # Pading Zip code, Trim & Lower city/state
+    # Bổ sung các số không (0) ở đầu cho mã bưu điện nhằm duy trì tính thống nhất 5 ký tự lưu trữ toàn cục.
+    # Cắt bỏ khoảng trắng thừa và chuẩn hóa văn bản chữ thường ngăn chặn sự phân mảnh dữ liệu khi thực thi các phép toán GroupBy.
     df_cleaned = df.withColumn("customer_zip_code_prefix", lpad(col("customer_zip_code_prefix").cast("string"), 5, "0")) \
                    .withColumn("customer_city", lower(trim(col("customer_city")))) \
                    .withColumn("customer_state", lower(trim(col("customer_state"))))
                    
     write_delta_table(df_cleaned, "silver", "silver_olist_customers_dataset", mode="overwrite")
 
+
 def transform_geolocation(spark):
+    """
+    Chuẩn hóa danh mục địa lý Geolocation.
+    Khởi tạo hệ thống dữ liệu thành một bảng tra cứu chuẩn (Lookup table) bằng cơ chế loại trừ trùng lặp khối lượng lớn.
+    """
     print("Transforming Geolocation...")
     df = read_delta_table(spark, "bronze", "olist_geolocation_dataset")
     
-    # Drop exact duplicates and pad zip codes
+    # Bổ sung số 0 (zero-padding) cho mã bưu điện.
+    # Chuẩn hóa văn bản thành chữ thường và loại bỏ khoảng trắng thừa.
     df_cleaned = df.dropDuplicates(["geolocation_zip_code_prefix", "geolocation_lat", "geolocation_lng"])
-    # Pad zip codes to 5 characters with leading zeros
     df_cleaned = df_cleaned.withColumn(
         "geolocation_zip_code_prefix", 
         lpad(col("geolocation_zip_code_prefix").cast("string"), 5, "0")
@@ -75,12 +107,22 @@ def transform_geolocation(spark):
         .withColumn("geolocation_state", trim(lower(col("geolocation_state"))))
     )
     
+    # Thiết lập nền tảng bảng tra cứu bằng việc ép buộc tính độc bản của mã bưu điện.
+    # Thao tác này nhằm loại trừ triệt để hiện tượng phản ứng chéo (Cartesian explosion) khi thực thi lệnh kết nối (Join).
+    df_cleaned = df_cleaned.dropDuplicates(["geolocation_zip_code_prefix"])
+
     write_delta_table(df_cleaned, "silver", "silver_olist_geolocation_dataset", mode="overwrite")
 
+
 def transform_order_payments(spark):
+    """
+    Chuẩn hóa bộ dữ liệu Order Payments.
+    Dữ liệu được lọc lỗi cấu trúc tham chiếu và chuẩn hóa phân loại, ghi đè xuống tầng Silver.
+    """
     print("Transforming Order Payments...")
     df = read_delta_table(spark, "bronze", "olist_order_payments_dataset")
 
+    # Quy chuẩn hóa khái niệm hạng mục thanh toán để thống nhất chuẩn ngữ nghĩa nội bộ.
     payment_mapping = {
         "credit_card": "credit card",
         "debit_card": "debit card",
@@ -88,30 +130,39 @@ def transform_order_payments(spark):
     }
     df_cleaned = df.replace(payment_mapping, subset=["payment_type"])
 
+    # Chỉ duy trì các trạng thái thanh toán hiện diện trong cơ sở dữ liệu hóa đơn hợp lệ.
+    # Mô hình Left Semi Join xử lý hiện tượng hóa đơn lưu vong (Orphaned records), bảo lưu cấu trúc toàn vẹn tham chiếu.
     df_orders = read_delta_table(spark, "silver", "silver_olist_orders_dataset").select("order_id")
     df_cleaned = df_cleaned.join(df_orders, on="order_id", how="left_semi")
 
     write_delta_table(df_cleaned, "silver", "silver_olist_order_payments_dataset", mode="overwrite")
 
+
 def transform_order_reviews(spark):
+    """
+    Chuẩn hóa cấu trúc kho dữ liệu Order Reviews.
+    Dữ liệu được khắc phục khuyết thiếu nội tại, định dạng toàn vẹn dữ liệu định danh và tiến hành ghi nền tảng xuống.
+    """
     print("Transforming Order Reviews...")
     df = read_delta_table(spark, "bronze", "olist_order_reviews_dataset")
 
     df_cleaned = (
         df
+        # Loại bỏ các hồ sơ đánh giá tổn thất định danh lõi, đảm bảo quy chuẩn bắt buộc của siêu liên kết nối.
         .dropna(subset=["review_id", "order_id"])
+        # Kiểm tra và trừ khử dị bản để kiến tạo mã khóa chính (Primary Key) độc bản tuyệt đối.
         .dropDuplicates(["review_id"])
-        # ✅ Cast types trước
-        .withColumn("review_creation_date",    to_timestamp(col("review_creation_date")))
+        # Thiết lập quy tắc dữ liệu thời gian về khuôn mẫu Timestamp.
+        .withColumn("review_creation_date", to_timestamp(col("review_creation_date")))
         .withColumn("review_answer_timestamp", to_timestamp(col("review_answer_timestamp")))
-        .withColumn("review_score",            col("review_score").cast("int"))
-        # Filter outlier
+        .withColumn("review_score", col("review_score").cast("int"))
+        # Tiến hành phân loại ngoại lệ (Outlier Filter), hệ thống phân tích không chấp nhận các chỉ số thoát ly khỏi thang điểm 5.
         .filter(col("review_score").isNull() | col("review_score").between(1, 5))
-        # ✅ fillna sau cùng
+        # Áp đặt giá trị mặc định cho các khoảng trống nội dung nhằm chặn đứng các rủi ro sập luồng (NullPointerException) trong hạ nguồn dịch vụ.
         .fillna({"review_comment_title": "No Title", "review_comment_message": "No Message"})
     )
 
-    # ✅ Chỉ select "order_id" để tối ưu shuffle
+    # Tối ưu hóa vùng tài nguyên cấp phát (Shuffle) bằng cơ chế giới hạn Select để lấy chính trường khóa order_id.
     df_orders = read_delta_table(spark, "silver", "silver_olist_orders_dataset").select("order_id")
     df_cleaned = df_cleaned.join(df_orders, on="order_id", how="left_semi")
 
@@ -119,38 +170,56 @@ def transform_order_reviews(spark):
 
 
 def transform_products(spark):
+    """
+    Tiêu chuẩn hóa dữ kiện phân cấp mặt hàng Products.
+    Tăng cường cấu trúc dữ liệu theo hình thức nối chéo thông tin từ điển để đẩy lên Silver.
+    """
     print("Transforming Products...")
     df = read_delta_table(spark, "bronze", "olist_products_dataset")
 
+    # Điền 'unknown' for missing product category names.
+    # Khôi phục bố cục khoảng trắng cho siêu cấu trúc phân loại.
     df_cleaned = (
-        df
-        .fillna({"product_category_name": "unknown"})
+        df.fillna({"product_category_name": "unknown"})
         .withColumn("product_category_name", regexp_replace(col("product_category_name"), "_", " "))
     )
 
-    # ✅ Đọc từ Silver — đã clean sẵn, không cần regexp_replace lại
+    # Khai thác trực tiếp kho từ vựng đã được làm sạch tại cấu trúc Silver trước đó, tránh hành vi lặp lại tiến trình thay thế Regex.
     df_translation = read_delta_table(spark, "silver", "silver_product_category_name_translation")
 
+    # Giảm thiểu gánh nặng vật lý cho tiến trình BI tại các tầng cao hơn thông qua thao tác ráp nối trực tiếp từ vựng tiếng Anh.
     df_cleaned = df_cleaned.join(df_translation, on="product_category_name", how="left")
     df_cleaned = df_cleaned.fillna({"product_category_name_english": "unknown"})
 
     write_delta_table(df_cleaned, "silver", "silver_olist_products_dataset", mode="overwrite")
-    
+
+
 def transform_sellers(spark):
+    """
+    Chuẩn hóa bộ dữ liệu phân bổ định danh Sellers.
+    Dữ liệu được nhất quán hóa định dạng text và quy đúc chiều dài mã zip, sau đó ghi đè tầng Silver.
+    """
     print("Transforming Sellers...")
     df = read_delta_table(spark, "bronze", "olist_sellers_dataset")
     
-    # Cast to string and pad with leading zeros up to 5 characters
+    # Bổ sung số 0 (zero-padding) cho mã bưu điện.
+    # Chuẩn hóa văn bản thành chữ thường và loại bỏ khoảng trắng thừa.
     df_cleaned = df.withColumn("seller_zip_code_prefix", lpad(col("seller_zip_code_prefix").cast("string"), 5, "0")) \
                    .withColumn("seller_city", lower(trim(col("seller_city")))) \
                    .withColumn("seller_state", lower(trim(col("seller_state"))))
                    
     write_delta_table(df_cleaned, "silver", "silver_olist_sellers_dataset", mode="overwrite")
 
+
 def transform_category_translation(spark):
+    """
+    Tinh giản kho từ vựng Product Category Name Translation.
+    Dữ liệu tự điển được thay thế ký tự lỗi để cấp quyền lưu trữ tham chiếu.
+    """
     print("Transforming Category Translations...")
     df = read_delta_table(spark, "bronze", "product_category_name_translation")
     
+    # Tiến hành thanh lọc toàn bộ ký tự gạch dưới thành khoảng trắng nhằm thiết lập ngôn ngữ chuẩn ở các chiều phân tích hạ tầng hệ thống.
     columns_to_clean = ["product_category_name", "product_category_name_english"]
     df_cleaned = df
     for c in columns_to_clean:
@@ -160,16 +229,16 @@ def transform_category_translation(spark):
 
 
 if __name__ == "__main__":
-    # Setup argument parser for Airflow integration
+    # Cấu trúc hệ thiết bị phân tích tham số luồng hệ thống cho nhiệm vụ đối chiếu với Apache Airflow.
     parser = argparse.ArgumentParser(description="Run Silver Layer Transformations")
     parser.add_argument("--table", type=str, required=True, 
                         help="Name of the table to transform (e.g., 'orders', 'products', 'all')")
     args = parser.parse_args()
 
-    # Initialize Spark
+    # Khởi chạy hệ điều hành phân tán và ấn định tên quá trình làm việc.
     spark = get_spark_session(app_name=f"SilverLayer-{args.table.capitalize()}")
 
-    # Route to the correct function based on the argument
+    # Mô hình định tuyến quy trình mã tự động phụ thuộc vào lệnh truy xuất từ môi trường luồng.
     if args.table == "orders":
         transform_orders(spark)
     elif args.table == "order_items":
@@ -189,8 +258,8 @@ if __name__ == "__main__":
     elif args.table == "translation":
         transform_category_translation(spark)
     elif args.table == "all":
-        # Runs everything sequentially if you just want to trigger the whole layer at once
-        # NOTE: Orders must run first because Reviews and Payments use it for validation
+        # Khởi chạy quy trình theo tuần tự dây chuyền có kiểm soát bảo lưu trạng thái tương quan.
+        # Lưu ý kỹ thuật: Bảng Orders nắm giữ vai trò bản nguyên quy định tính hợp lệ tham chiếu cho nhóm bảng giao dịch (Reviews, Payments).
         transform_orders(spark)
         transform_order_items(spark)
         transform_customers(spark)
