@@ -2,7 +2,6 @@ import sys
 import os
 import argparse
 
-# vị trí thư mục gốc và tích hợp vào biến môi trường hệ thống.
 # nạp các mô-đun thiết lập tùy chỉnh (như etl_pipeline) một cách an toàn.
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
@@ -229,7 +228,6 @@ def transform_category_translation(spark):
 
 
 if __name__ == "__main__":
-    # Cấu trúc hệ thiết bị phân tích tham số luồng hệ thống cho nhiệm vụ đối chiếu với Apache Airflow.
     parser = argparse.ArgumentParser(description="Run Silver Layer Transformations")
     parser.add_argument("--table", type=str, required=True, 
                         help="Name of the table to transform (e.g., 'orders', 'products', 'all')")
@@ -258,8 +256,7 @@ if __name__ == "__main__":
     elif args.table == "translation":
         transform_category_translation(spark)
     elif args.table == "all":
-        # Khởi chạy quy trình theo tuần tự dây chuyền có kiểm soát bảo lưu trạng thái tương quan.
-        # Lưu ý kỹ thuật: Bảng Orders nắm giữ vai trò bản nguyên quy định tính hợp lệ tham chiếu cho nhóm bảng giao dịch (Reviews, Payments).
+        # Khởi chạy quy trình theo tuần tự
         transform_orders(spark)
         transform_order_items(spark)
         transform_customers(spark)
