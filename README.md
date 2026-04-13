@@ -2,14 +2,20 @@
 
 **Tên đề tài:** "Xây dựng hệ thống Data Lakehouse phân tích dữ liệu bán hàng và hành vi khách hàng trên tập dữ liệu thương mại điện tử Olist"
 
-**Mô tả tổng quan:** Ứng dụng kiến trúc Medallion (Bronze - Silver - Gold) kết hợp với các công cụ như Apache Spark, Apache Airflow, Amazon S3, Delta Lake, AWS Athena và Power BI để xây dựng luồng xử lý dữ liệu (ETL Pipeline) tự động quy mô lớn.
+**Mô tả tổng quan:** Ứng dụng kiến trúc Medallion 4 tầng (Bronze - Silver - Gold - Platinum) kết hợp với các công cụ như Apache Spark, Apache Airflow, Amazon S3, Delta Lake, AWS Athena và Power BI để xây dựng luồng xử lý dữ liệu (ETL Pipeline) tự động quy mô lớn.
+
+## Hệ thống Data Lakehouse 4 Tầng (Medallion Architecture)
+- **Bronze Layer (Ingestion):** Dữ liệu thô từ nguồn (Olist CSVs) được tải vào Data Lake (Amazon S3) dưới định dạng Delta Lake, hỗ trợ Full Load và Incremental Load.
+- **Silver Layer (Cleaned):** Dữ liệu được làm sạch, xử lý null, loại bỏ trùng lặp và chuẩn hóa kiểu dữ liệu tạo thành "Single Source of Truth".
+- **Gold Layer (Data Modeling):** Xây dựng mô hình Star Schema (Fact & Dimension), phân rã dữ liệu tối ưu hóa bằng Z-Ordering và Partitioning.
+- **Platinum Layer (Data Marts & BI):** Dữ liệu được tổng hợp sẵn (Aggregated) theo các chiều phân tích báo cáo (như RFM, vận chuyển), phục vụ truy vấn cực nhanh cho AWS Athena và Dashboard Power BI.
 
 ## Kiến trúc hệ thống
 ![Data Lakehouse Architecture](assets/architecture.png)
 
 ## Cấu trúc thư mục
-- `etl_pipeline/`: Chứa các Spark jobs xử lý dữ liệu theo tầng Medallion (bronze, silver, gold).
-- `dags/`: Chứa các Airflow DAGs để lập lịch và điều phối luồng dữ liệu (ETL pipeline).
+- `etl_pipeline/`: Chứa các Spark jobs xử lý dữ liệu tương ứng các tầng (bronze, silver, gold, platinum).
+- `dags/`: Chứa các file Airflow DAGs. Hệ thống sử dụng **Master DAG** (`master_pipeline_dag.py`) để điều phối chạy tuần tự chuỗi ETL: Bronze → Silver → Gold → Platinum.
 - `docker/`: Chứa Dockerfile và cấu hình cho các dịch vụ (Spark, Airflow).
 - `dataset/`: Chứa bộ dữ liệu gốc của Olist (các tệp CSV).
 - `config/`: Configuration files cho Spark, Airflow hoặc các dịch vụ khác.
@@ -42,9 +48,24 @@ Dựa trên bộ dữ liệu **Olist E-commerce** (Brazil), hệ thống Data La
 
 ### Yêu cầu hệ thống
 - Đã cài đặt Docker và Docker Compose.
+- Có tài khoản AWS (S3, Glue, Athena) và Access Keys để cấu hình lưu trữ Data Lake.
 
-### 1. Build và Khởi động Dịch vụ
-Chạy lệnh sau để build images và khởi động tất cả các dịch vụ ở chế độ chạy ngầm:
+### 1. Cấu hình môi trường (Bắt buộc)
+Trước khi chạy hệ thống, tạo file `.env` (copy từ `.env.example`) và thiết lập các biến môi trường kết nối AWS:
+```bash
+cp .env.example .env
+```
+Nội dung file `.env`:
+```env
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION=us-east-1
+S3_BUCKET_NAME=your-lakehouse-bucket
+```
+
+### 2. Build và Khởi động Dịch vụ
+Chạy lệnh sau để build images và khởi chạy tất cả các dịch vụ dưới dạng nền (chạy ngầm). 
+*(Lưu ý: Hệ thống đã tích hợp quy trình `airflow-init` để tự động tạo Connections cho AWS và Spark trong Airflow dựa trên file .env, do đó không cần cấu hình thủ công trên giao diện UI)*
 ```bash
 docker compose up -d --build
 ```
