@@ -38,8 +38,7 @@ x-airflow-common: &airflow-common
     - lakehouse-net
 
 services:
-
-  # ── SPARK ─────────────────────────────────────────────
+  # SPARK 
   spark-master:
     <<: *spark-common
     container_name: spark-master
@@ -64,7 +63,7 @@ services:
     depends_on:
       - spark-master
 
-  # ── AIRFLOW ───────────────────────────────────────────
+  # AIRFLOW
   airflow-db:
     image: postgres:15
     container_name: airflow-db
@@ -110,7 +109,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  # ── JUPYTER ───────────────────────────────────────────
+  # JUPYTER
   jupyter:
     <<: *spark-common
     container_name: jupyter
