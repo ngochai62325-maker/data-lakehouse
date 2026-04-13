@@ -64,13 +64,11 @@ ETL_SCRIPTS = {
     "ingest_csv_to_bronze":  f"{ETL_BASE_PATH}/ingestion/ingest_csv_to_bronze.py",
     "validate_bronze":       f"{ETL_BASE_PATH}/ingestion/validate_bronze.py",
 
-    # ── Silver Layer (TV2) ── Thêm đường dẫn khi có script
-    # "transform_silver":    f"{ETL_BASE_PATH}/transformation/transform_silver.py",
-    # "validate_silver":     f"{ETL_BASE_PATH}/transformation/validate_silver.py",
+    # ── Silver Layer (TV2) ──
+    "bronze_to_silver":     f"{ETL_BASE_PATH}/processing/bronze_to_silver.py",
 
-    # ── Gold Layer (TV3) ── Thêm đường dẫn khi có script
-    # "aggregate_gold":      f"{ETL_BASE_PATH}/aggregation/aggregate_gold.py",
-    # "validate_gold":       f"{ETL_BASE_PATH}/aggregation/validate_gold.py",
+    # ── Gold Layer (TV3) ──
+    "silver_to_gold":       f"{ETL_BASE_PATH}/processing/silver_to_gold.py",
 
     # ── Platinum Layer (TV4) ──
     "gold_to_platinum":     f"{ETL_BASE_PATH}/processing/gold_to_platinum.py",

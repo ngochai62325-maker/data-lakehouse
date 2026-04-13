@@ -5,7 +5,7 @@ from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.operators.empty import EmptyOperator
 
-# ── Import cấu hình chung từ dag_config ─────────────────────────────────────
+# Import cấu hình chung từ dag_config 
 from dag_config import (
     get_default_args,
     create_spark_submit_kwargs,
@@ -16,11 +16,11 @@ from dag_config import (
 )
 
 
-# ─── Cấu hình mặc định ──────────────────────────────────────────────────────
+# Cấu hình mặc định 
 default_args = get_default_args(owner="thanhvien1")
 
 
-# ─── Hàm phân nhánh: xác định chế độ nạp CSV ────────────────────────────────
+# Hàm phân nhánh: xác định chế độ nạp CSV 
 def _pick_load_mode(**context):
     """
     Tự động chọn chế độ nạp dựa trên cách trigger:
@@ -34,7 +34,7 @@ def _pick_load_mode(**context):
     return "csv_incremental_load"
 
 
-# ─── Hàm log kết quả ─────────────────────────────────────────────────────────
+# Hàm log kết quả 
 def _log_completion(**context):
     """Ghi log tổng kết khi toàn bộ pipeline Bronze hoàn tất."""
     dag_run = context["dag_run"]
@@ -60,21 +60,21 @@ with DAG(
     description="[TV1] Nạp dữ liệu Olist CSV vào Bronze Layer + Validation",
     schedule_interval=DAG_SCHEDULES["bronze"],
     catchup=False,
-    max_active_runs=1,                   # Chỉ cho chạy 1 lần tại 1 thời điểm
+    max_active_runs=1,                  
     tags=DAG_TAGS["bronze"],
 ) as dag:
 
-    # ── Task 1: Bắt đầu ─────────────────────────────────────────────────────
+    # Task 1: Bắt đầu 
     start = EmptyOperator(task_id="start")
 
-    # ── Task 2: Phân nhánh chọn chế độ nạp CSV ──────────────────────────────
+    # Task 2: Phân nhánh chọn chế độ nạp CSV 
     pick_mode = BranchPythonOperator(
         task_id="pick_load_mode",
         python_callable=_pick_load_mode,
     )
 
-    # ── Task 3a: CSV Full Load ───────────────────────────────────────────────
-    #    Nạp toàn bộ 9 bảng Olist CSV → Delta Table (ghi đè)
+    # Task 3a: CSV Full Load 
+    # Nạp toàn bộ 9 bảng Olist CSV → Delta Table (ghi đè)
     csv_full_load = SparkSubmitOperator(
         task_id="csv_full_load",
         **create_spark_submit_kwargs(
@@ -84,8 +84,8 @@ with DAG(
         ),
     )
 
-    # ── Task 3b: CSV Incremental Load ────────────────────────────────────────
-    #    Nạp gia tăng (MERGE) dữ liệu mới từ thư mục incremental
+    # Task 3b: CSV Incremental Load 
+    # Nạp gia tăng (MERGE) dữ liệu mới từ thư mục incremental
     csv_incremental_load = SparkSubmitOperator(
         task_id="csv_incremental_load",
         **create_spark_submit_kwargs(
@@ -95,24 +95,24 @@ with DAG(
         ),
     )
 
-    # ── Task 4: Validate Bronze Layer ────────────────────────────────────────
-    #    Kiểm định tất cả bảng Olist Bronze đã nạp đúng và đầy đủ
+    # Task 4: Validate Bronze Layer 
+    # Kiểm định tất cả bảng Olist Bronze đã nạp đúng và đầy đủ
     validate_bronze = SparkSubmitOperator(
         task_id="validate_bronze",
         **create_spark_submit_kwargs(
             application=ETL_SCRIPTS["validate_bronze"],
             app_name="bronze_validation",
         ),
-        trigger_rule="one_success",      # Chạy khi 1 trong 2 nhánh CSV thành công
+        trigger_rule="one_success",      
     )
 
-    # ── Task 5: Ghi log hoàn tất ─────────────────────────────────────────────
+    # Task 5: Ghi log hoàn tất 
     log_done = PythonOperator(
         task_id="log_completion",
         python_callable=_log_completion,
     )
 
-    # ── Task 6: Kết thúc ─────────────────────────────────────────────────────
+    # Task 6: Kết thúc 
     end = EmptyOperator(task_id="end")
 
     start >> pick_mode
