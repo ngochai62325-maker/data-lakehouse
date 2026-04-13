@@ -15,7 +15,6 @@ from dag_config import (
 )
 
 # Cấu hình mặc định 
-# Theo phân công trong dag_config.py, Gold Layer do thanhvien3 phụ trách
 default_args = get_default_args(owner="thanhvien3")
 
 # ĐỊNH NGHĨA DAG
@@ -23,10 +22,10 @@ with DAG(
     dag_id=DAG_IDS["gold"],
     default_args=default_args,
     description="[TV3] Xử lý và tạo các bảng Dimension/Fact cho Gold Layer (Star Schema)",
-    schedule_interval=DAG_SCHEDULES["gold"], # Đã được cấu hình là None trong dag_config
+    schedule_interval=DAG_SCHEDULES["gold"], 
     catchup=False,
     max_active_runs=1,
-    max_active_tasks=2, # Giới hạn 2 task chạy đồng thời để tránh tràn RAM (OOM)
+    max_active_tasks=2, 
     tags=DAG_TAGS["gold"],
 ) as dag:
 

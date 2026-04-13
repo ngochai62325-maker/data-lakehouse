@@ -1,0 +1,4 @@
+order_id,customer_id,order_status,order_purchase_timestamp,order_approved_at,order_delivered_carrier_date,order_delivered_customer_date,order_estimated_delivery_date
+demo_order_001,demo_customer_001,delivered,2024-04-13 10:00:00,2024-04-13 10:30:00,2024-04-14 12:00:00,2024-04-15 15:00:00,2024-04-20 00:00:00
+demo_order_002,demo_customer_002,delivered,2024-04-13 11:00:00,2024-04-13 11:30:00,2024-04-14 12:00:00,2024-04-15 15:00:00,2024-04-20 00:00:00
+demo_order_003,demo_customer_001,delivered,2024-04-13 12:00:00,2024-04-13 12:30:00,2024-04-14 12:00:00,2024-04-15 15:00:00,2024-04-20 00:00:00

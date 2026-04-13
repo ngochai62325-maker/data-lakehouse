@@ -13,11 +13,11 @@ from dag_config import (
 )
 
 
-# ─── Default Args ────────────────────────────────────────────────────────────
+# Default Args 
 default_args = get_default_args(owner="admin", retries=1)
 
 
-# ─── Hàm log ─────────────────────────────────────────────────────────────────
+# Hàm log 
 def _log_pipeline_start(**context):
     """Ghi log khi Master Pipeline bắt đầu chạy."""
     print("=" * 70)
@@ -52,25 +52,25 @@ with DAG(
     tags=DAG_TAGS["master"],
 ) as dag:
 
-    # ── Start ─────────────────────────────────────────────────────────────────
+    # Start 
     start = PythonOperator(
         task_id="pipeline_start",
         python_callable=_log_pipeline_start,
     )
 
-    # ── Trigger Bronze Ingestion ──────────────────────────────────────────────
+    # Trigger Bronze Ingestion 
     trigger_bronze = TriggerDagRunOperator(
         task_id="trigger_bronze_ingestion",
         trigger_dag_id=DAG_IDS["bronze"],
-        wait_for_completion=True,            # Chờ DAG con chạy xong
-        poke_interval=30,                    # Kiểm tra trạng thái mỗi 30s
-        allowed_states=["success"],          # Chỉ tiếp tục nếu thành công
-        failed_states=["failed"],            # Dừng nếu DAG con thất bại
-        reset_dag_run=True,                  # Reset nếu DAG run đã tồn tại
-        retries=0,                           # Fail-fast: không retry lại trigger ở Master
+        wait_for_completion=True,           
+        poke_interval=30,                   
+        allowed_states=["success"],          
+        failed_states=["failed"],            
+        reset_dag_run=True,                  
+        retries=0,                           
     )
 
-    # ── Trigger Silver Transformation ─────────────────────────────────────────
+    # Trigger Silver Transformation 
     trigger_silver = TriggerDagRunOperator(
         task_id="trigger_silver_transformation",
         trigger_dag_id=DAG_IDS["silver"],
@@ -82,7 +82,7 @@ with DAG(
         retries=0,
     )
 
-    # ── Trigger Gold Aggregation ──────────────────────────────────────────────
+    # Trigger Gold Aggregation 
     trigger_gold = TriggerDagRunOperator(
         task_id="trigger_gold_aggregation",
         trigger_dag_id=DAG_IDS["gold"],
@@ -94,7 +94,7 @@ with DAG(
         retries=0,
     )
 
-    # ── Trigger Platinum BI ───────────────────────────────────────────────────
+    # Trigger Platinum BI 
     trigger_platinum = TriggerDagRunOperator(
         task_id="trigger_platinum_bi",
         trigger_dag_id=DAG_IDS["platinum"],
@@ -106,7 +106,7 @@ with DAG(
         retries=0,
     )
 
-    # ── End ───────────────────────────────────────────────────────────────────
+    # End 
     end = PythonOperator(
         task_id="pipeline_end",
         python_callable=_log_pipeline_end,

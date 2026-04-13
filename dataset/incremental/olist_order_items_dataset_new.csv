@@ -1,0 +1,4 @@
+order_id,order_item_id,product_id,seller_id,shipping_limit_date,price,freight_value
+demo_order_001,1,demo_product_001,demo_seller_001,2024-04-15 00:00:00,100.0,20.0
+demo_order_002,1,demo_product_002,demo_seller_001,2024-04-15 00:00:00,150.0,15.0
+demo_order_003,1,demo_product_001,demo_seller_001,2024-04-15 00:00:00,89.9,10.0

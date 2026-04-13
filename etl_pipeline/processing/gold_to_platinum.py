@@ -22,12 +22,10 @@ import sys
 import os
 import argparse
 
-# --- PATH FIX ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
-# ----------------
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import (
@@ -41,15 +39,12 @@ from etl_pipeline.utils.s3_reader import read_delta_table
 from etl_pipeline.utils.s3_writer import write_delta_table
 
 
-# =============================================================================
 # SCHEMA NORMALIZATION — Tránh lỗi HIVE_BAD_DATA khi query bằng Athena
-# =============================================================================
-#
+
 # Vấn đề: Spark có thể ghi Parquet với type INT32, nhưng Glue Catalog
 #          định nghĩa DOUBLE → Athena reject file → lỗi toàn bộ mart.
-#
+
 # Giải pháp: Cast toàn bộ column theo quy tắc nhất quán trước khi write.
-# =============================================================================
 
 # Mapping: tên cột → Spark type (khớp 100% với Glue Catalog)
 SCHEMA_OVERRIDES = {
