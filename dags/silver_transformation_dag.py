@@ -30,17 +30,8 @@ with DAG(
     # Task 1: Nút khởi tạo luồng dữ liệu
     start = EmptyOperator(task_id="start")
 
-    # Task 2: Bộ cảm biến (Sensor) chờ luồng dữ liệu cấp Bronze hoàn thành thành công
-    wait_for_bronze = ExternalTaskSensor(
-        task_id="wait_for_bronze_layer",
-        external_dag_id=DAG_IDS["bronze"],
-        external_task_id=None,          # Chờ toàn bộ tiến trình của DAG cấp Bronze hoàn thành thay vì một công việc cụ thể
-        allowed_states=["success"],
-        failed_states=["failed"],
-        mode="poke",
-        poke_interval=60,
-        timeout=3600,
-    )
+    # Task 2: Bộ cảm biến (Sensor) không còn cần thiết do Master Pipeline (TriggerDagRunOperator) đã tự động wait_for_completion=True
+    # Do đó, chỉ cần gọi lớp Silver là đã biết chắc lớp Bronze đã chạy xong.
 
     # Task 3: Kích hoạt ứng dụng Spark Submit để thực hiện tiền xử lý dữ liệu cho tất cả các bảng
     transform_bronze_to_silver = SparkSubmitOperator(
@@ -56,4 +47,4 @@ with DAG(
     end = EmptyOperator(task_id="end")
 
     # Thiết lập trình tự luồng thực thi công việc (Pipeline Flow)
-    start >> wait_for_bronze >> transform_bronze_to_silver >> end
+    start >> transform_bronze_to_silver >> end

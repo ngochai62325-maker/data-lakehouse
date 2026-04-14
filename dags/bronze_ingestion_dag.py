@@ -4,6 +4,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.operators.empty import EmptyOperator
+from airflow.models.param import Param
 
 # Import cấu hình chung từ dag_config 
 from dag_config import (
@@ -23,13 +24,13 @@ default_args = get_default_args(owner="thanhvien1")
 # Hàm phân nhánh: xác định chế độ nạp CSV 
 def _pick_load_mode(**context):
     """
-    Tự động chọn chế độ nạp dựa trên cách trigger:
-    - Bấm nút Trigger trên UI (manual)  → full_load  (nạp toàn bộ)
-    - Chạy theo lịch hẹn giờ (scheduled) → incremental (nạp gia tăng)
+    Tự động chọn chế độ nạp cấu hình Params từ UI.
+    Khi đã gắn Params, Airflow sẽ luôn ưu tiên cấu hình do người dùng chọn trên giao diện.
     """
-    dag_run = context.get("dag_run")
+    # Đọc cấu hình load_mode từ context.params (do tính năng Param của Airflow cung cấp)
+    mode = context["params"].get("load_mode", "incremental")
 
-    if dag_run.run_type == "manual":
+    if mode == "full_load":
         return "csv_full_load"
     return "csv_incremental_load"
 
@@ -62,6 +63,13 @@ with DAG(
     catchup=False,
     max_active_runs=1,                  
     tags=DAG_TAGS["bronze"],
+    params={
+        "load_mode": Param(
+            "incremental", 
+            enum=["incremental", "full_load"], 
+            description="Chế độ nạp dữ liệu: incremental (gia tăng) hoặc full_load (nạp lại toàn bộ)"
+        )
+    },
 ) as dag:
 
     # Task 1: Bắt đầu 

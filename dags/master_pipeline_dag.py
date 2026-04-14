@@ -4,6 +4,7 @@ from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.models.param import Param
 
 from dag_config import (
     get_default_args,
@@ -50,6 +51,13 @@ with DAG(
     catchup=False,
     max_active_runs=1,
     tags=DAG_TAGS["master"],
+    params={
+        "load_mode": Param(
+            "incremental", 
+            enum=["incremental", "full_load"], 
+            description="Chế độ chạy nạp dữ liệu cho tầng Bronze (Mặc định: incremental)"
+        )
+    },
 ) as dag:
 
     # Start 
@@ -62,6 +70,7 @@ with DAG(
     trigger_bronze = TriggerDagRunOperator(
         task_id="trigger_bronze_ingestion",
         trigger_dag_id=DAG_IDS["bronze"],
+        conf={"load_mode": "{{ params.load_mode }}"},
         wait_for_completion=True,           
         poke_interval=30,                   
         allowed_states=["success"],          
