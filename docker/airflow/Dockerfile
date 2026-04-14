@@ -2,7 +2,7 @@ FROM apache/airflow:2.9.0-python3.11
 
 USER root
 RUN apt-get update && \
-    apt-get install -y gcc python3-dev && \
+    apt-get install -y gcc python3-dev default-jre-headless procps && \
     rm -rf /var/lib/apt/lists/*
 
 USER airflow
