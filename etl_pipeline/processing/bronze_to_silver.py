@@ -2,7 +2,7 @@ import sys
 import os
 import argparse
 
-# nạp các mô-đun thiết lập tùy chỉnh (như etl_pipeline) một cách an toàn.
+# nạp các mô-đun thiết lập
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
 
@@ -32,8 +32,8 @@ def transform_orders(spark):
     print("Transforming Orders...")
     df = read_delta_table(spark, "bronze", "olist_orders_dataset")
     
-    # Chuyển đổi các trường mốc sự kiện sang định dạng Timestamp chuẩn để phục vụ phân tích chuỗi thời gian.
-    # Cấu trúc này không sử dụng thao tác loại bỏ giá trị Null nhằm bảo tồn dữ liệu của các đơn hàng chưa khép kín quy trình (chưa giao hàng, bị hủy).
+    # Chuyển đổi các trường mốc sự kiện sang định dạng Timestamp chuẩn
+    # không loại bỏ giá trị Null nhằm bảo tồn dữ liệu của các đơn hàng chưa khép kín quy trình (chưa giao hàng, bị hủy).
     timestamp_cols = [
         "order_purchase_timestamp", "order_approved_at", 
         "order_delivered_carrier_date", "order_delivered_customer_date", 
@@ -59,7 +59,7 @@ def transform_order_items(spark):
     print("Transforming Order Items...")
     df = read_delta_table(spark, "bronze", "olist_order_items_dataset")
     
-    # Thiết lập kiểu số thực (Double) cho các trường tài chính để duy trì độ vẹn toàn khi vận hành phép toán tổng hợp tại tầng Gold.
+    # Thiết lập kiểu số thực (Double) cho các trường tài chính
     # Chuẩn hóa trường shipping_limit_date sang định dạng Timestamp.
     df_cleaned = df.withColumn("shipping_limit_date", to_timestamp(col("shipping_limit_date"))) \
                    .withColumn("price", col("price").cast("double")) \
@@ -77,7 +77,7 @@ def transform_customers(spark):
     df = read_delta_table(spark, "bronze", "olist_customers_dataset")
     
     # Bổ sung các số không (0) ở đầu cho mã bưu điện nhằm duy trì tính thống nhất 5 ký tự lưu trữ toàn cục.
-    # Cắt bỏ khoảng trắng thừa và chuẩn hóa văn bản chữ thường ngăn chặn sự phân mảnh dữ liệu khi thực thi các phép toán GroupBy.
+    # Cắt bỏ khoảng trắng thừa và chuẩn hóa văn bản chữ thường
     df_cleaned = df.withColumn("customer_zip_code_prefix", lpad(col("customer_zip_code_prefix").cast("string"), 5, "0")) \
                    .withColumn("customer_city", lower(trim(col("customer_city")))) \
                    .withColumn("customer_state", lower(trim(col("customer_state"))))
@@ -93,7 +93,7 @@ def transform_geolocation(spark):
     print("Transforming Geolocation...")
     df = read_delta_table(spark, "bronze", "olist_geolocation_dataset")
     
-    # Bổ sung số 0 (zero-padding) cho mã bưu điện.
+    # Bổ sung số 0 cho mã bưu điện.
     # Chuẩn hóa văn bản thành chữ thường và loại bỏ khoảng trắng thừa.
     df_cleaned = df.dropDuplicates(["geolocation_zip_code_prefix", "geolocation_lat", "geolocation_lng"])
     df_cleaned = df_cleaned.withColumn(
@@ -107,7 +107,7 @@ def transform_geolocation(spark):
     )
     
     # Thiết lập nền tảng bảng tra cứu bằng việc ép buộc tính độc bản của mã bưu điện.
-    # Thao tác này nhằm loại trừ triệt để hiện tượng phản ứng chéo (Cartesian explosion) khi thực thi lệnh kết nối (Join).
+    # Xoá bỏ các bản ghi trùng lặp dựa trên mã bưu điện, vĩ độ và kinh độ
     df_cleaned = df_cleaned.dropDuplicates(["geolocation_zip_code_prefix"])
 
     write_delta_table(df_cleaned, "silver", "silver_olist_geolocation_dataset", mode="overwrite")
@@ -149,15 +149,15 @@ def transform_order_reviews(spark):
         df
         # Loại bỏ các hồ sơ đánh giá tổn thất định danh lõi, đảm bảo quy chuẩn bắt buộc của siêu liên kết nối.
         .dropna(subset=["review_id", "order_id"])
-        # Kiểm tra và trừ khử dị bản để kiến tạo mã khóa chính (Primary Key) độc bản tuyệt đối.
+        # Kiểm tra và loại bỏ các bản ghi trùng lặp để kiến tạo mã khóa chính (Primary Key) độc bản tuyệt đối.
         .dropDuplicates(["review_id"])
-        # Thiết lập quy tắc dữ liệu thời gian về khuôn mẫu Timestamp.
+        # Chuyển sang dữ liệu thời gian về Timestamp.
         .withColumn("review_creation_date", to_timestamp(col("review_creation_date")))
         .withColumn("review_answer_timestamp", to_timestamp(col("review_answer_timestamp")))
         .withColumn("review_score", col("review_score").cast("int"))
-        # Tiến hành phân loại ngoại lệ (Outlier Filter), hệ thống phân tích không chấp nhận các chỉ số thoát ly khỏi thang điểm 5.
+        # Tiến hành phân loại ngoại lệ (Outlier Filter)
         .filter(col("review_score").isNull() | col("review_score").between(1, 5))
-        # Áp đặt giá trị mặc định cho các khoảng trống nội dung nhằm chặn đứng các rủi ro sập luồng (NullPointerException) trong hạ nguồn dịch vụ.
+        # Áp đặt giá trị mặc định cho các khoảng trống nội dung nhằm chặn đứng các rủi ro sập luồng (NullPointerException)
         .fillna({"review_comment_title": "No Title", "review_comment_message": "No Message"})
     )
 
@@ -183,10 +183,10 @@ def transform_products(spark):
         .withColumn("product_category_name", regexp_replace(col("product_category_name"), "_", " "))
     )
 
-    # Khai thác trực tiếp kho từ vựng đã được làm sạch tại cấu trúc Silver trước đó, tránh hành vi lặp lại tiến trình thay thế Regex.
+    # Khai thác trực tiếp kho từ vựng đã được làm sạch tại cấu trúc Silver trước đó
     df_translation = read_delta_table(spark, "silver", "silver_product_category_name_translation")
 
-    # Giảm thiểu gánh nặng vật lý cho tiến trình BI tại các tầng cao hơn thông qua thao tác ráp nối trực tiếp từ vựng tiếng Anh.
+    # Giảm thiểu gánh nặng vật lý cho tiến trình BI tại các tầng cao hơn
     df_cleaned = df_cleaned.join(df_translation, on="product_category_name", how="left")
     df_cleaned = df_cleaned.fillna({"product_category_name_english": "unknown"})
 
@@ -233,10 +233,8 @@ if __name__ == "__main__":
                         help="Name of the table to transform (e.g., 'orders', 'products', 'all')")
     args = parser.parse_args()
 
-    # Khởi chạy hệ điều hành phân tán và ấn định tên quá trình làm việc.
     spark = get_spark_session(app_name=f"SilverLayer-{args.table.capitalize()}")
 
-    # Mô hình định tuyến quy trình mã tự động phụ thuộc vào lệnh truy xuất từ môi trường luồng.
     if args.table == "orders":
         transform_orders(spark)
     elif args.table == "order_items":
