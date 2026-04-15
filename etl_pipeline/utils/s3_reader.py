@@ -12,4 +12,8 @@ def read_delta_table(spark, layer, table_name):
     else:
         raise ValueError("Layer must be 'bronze', 'silver', 'gold', or 'platinum'")
 
-    return spark.read.format("delta").load(path)
+    if layer == "platinum":
+        return spark.read.format("parquet").load(path)
+    else:
+        return spark.read.format("delta").load(path)
+
