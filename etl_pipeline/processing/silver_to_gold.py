@@ -179,14 +179,12 @@ if __name__ == "__main__":
     elif args.table == "fact_order_fulfillment":
         transform_fact_order_fulfillment(spark)
     elif args.table == "all":
-        print("========== Running complete Gold layer pipeline sequentially...")
         transform_dim_products(spark)
         transform_dim_sellers(spark)
         transform_dim_customers(spark)
         transform_dim_date(spark)
         transform_fact_sales(spark)
         transform_fact_order_fulfillment(spark)
-        print("========== Gold layer pipeline complete!")
     else:
         print(f"Unknown table parameter: {args.table}")
 
