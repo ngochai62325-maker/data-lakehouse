@@ -47,11 +47,11 @@ def full_load(spark):
             print(f"\n[{table_name}]")
             print(f"Đọc từ: {csv_path}")
             
-            # CẬP NHẬT: Thêm xử lý multiLine và escape để chống vỡ dòng
+            # Thêm xử lý multiLine và escape để chống vỡ dòng
             df = spark.read.csv(csv_path, header=True, inferSchema=True, multiLine=True, escape='"')
             row_count = df.count()
             
-            # CẬP NHẬT: Thêm overwriteSchema
+            # Thêm overwriteSchema
             df.write \
                 .format("delta") \
                 .mode("overwrite") \
@@ -92,7 +92,7 @@ def incremental_load(spark):
             print(f"\n[{table_name}]")
             print(f"Kiểm tra: {new_data_file}")
             
-            # CẬP NHẬT: Thêm xử lý multiLine và escape cho dữ liệu mới
+            # Thêm xử lý multiLine và escape cho dữ liệu mới
             df_new = spark.read.csv(new_data_file, header=True, inferSchema=True, multiLine=True, escape='"')
             new_count = df_new.count()
             
@@ -119,7 +119,7 @@ def incremental_load(spark):
                 
                 print(f"MERGE thành công")
             else:
-                # Tạo mới nếu chưa tồn tại (CẬP NHẬT: Thêm overwriteSchema phòng hờ)
+                # Tạo mới nếu chưa tồn tại (Thêm overwriteSchema phòng hờ)
                 df_new.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(bronze_path)
                 print(f"Tạo mới Delta Table")
             
